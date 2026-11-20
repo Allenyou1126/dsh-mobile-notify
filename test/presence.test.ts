@@ -35,6 +35,20 @@ test('hidden web pages still count as live for ack waiting', () => {
   assert.equal(store.phoneForeground(), false)
 })
 
+test('web visible ignores window focus but requires visible + the web TTL', () => {
+  const clock = new FakeClock()
+  const store = new PresenceStore(clock)
+  store.update(presence())
+  assert.equal(store.webVisible(), true)
+  store.update(presence({ focused: false }))
+  assert.equal(store.webVisible(), true)
+  store.update(presence({ visibility: 'hidden' }))
+  assert.equal(store.webVisible(), false)
+  store.update(presence())
+  clock.advance(WEB_TTL_MS + 1)
+  assert.equal(store.webVisible(), false)
+})
+
 test('shell foreground requires visible + focused and the shorter TTL', () => {
   const clock = new FakeClock()
   const store = new PresenceStore(clock)

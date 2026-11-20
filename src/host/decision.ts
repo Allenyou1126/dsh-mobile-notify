@@ -148,6 +148,14 @@ export class DecisionEngine {
     record.debounceTimer = undefined
     const config = this.deps.config
 
+    // turn/end has no Client pendingInteraction to acknowledge. Any visible web
+    // page is therefore the web delivery surface for turnDone, even when its
+    // window is not focused.
+    if (record.event.kind === 'turn' && this.deps.presence.webVisible()) {
+      this.suppress(record)
+      return
+    }
+
     if (
       config.notify.inPage
       && config.notify.inPageCountsAsDelivered
@@ -184,6 +192,10 @@ export class DecisionEngine {
   private onGraceTimeout(record: PendingRecord): void {
     if (this.records.get(record.baseKey) !== record || record.state !== 'waiting-ack') return
     record.graceTimer = undefined
+    if (record.event.kind === 'turn' && this.deps.presence.webVisible()) {
+      this.suppress(record)
+      return
+    }
     if (
       this.deps.config.notify.inPage
       && this.deps.config.notify.inPageCountsAsDelivered
@@ -201,9 +213,13 @@ export class DecisionEngine {
 
   private onPresenceChanged(): void {
     for (const record of this.records.values()) {
+      if (record.state !== 'waiting-ack') continue
+      if (record.event.kind === 'turn' && this.deps.presence.webVisible()) {
+        this.suppress(record)
+        continue
+      }
       if (
-        record.state === 'waiting-ack'
-        && this.deps.config.notify.inPage
+        this.deps.config.notify.inPage
         && this.deps.config.notify.inPageCountsAsDelivered
         && this.deps.presence.phoneForeground()
       ) {

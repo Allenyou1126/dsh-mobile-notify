@@ -178,6 +178,31 @@ test('duplicate events do not create a second push', async () => {
   engine.dispose()
 })
 
+test('a visible web page suppresses one-shot turn delivery', async () => {
+  const { clock, presenceStore, engine, transport } = harness({ turnDone: true })
+  presenceStore.update(presence({ focused: false }))
+  engine.begin(makeEvent({ kind: 'turn', oneShot: true }))
+  clock.advance(1500)
+  await flush()
+  assert.equal(transport.sent.length, 0)
+  assert.equal(engine.pendingCount, 0)
+  engine.dispose()
+})
+
+test('a web page becoming visible during grace cancels a turn push', async () => {
+  const { clock, presenceStore, engine, transport } = harness({ turnDone: true })
+  presenceStore.update(presence({ visibility: 'hidden', focused: false }))
+  engine.begin(makeEvent({ kind: 'turn', oneShot: true }))
+  clock.advance(1500)
+  await flush()
+  assert.equal(transport.sent.length, 0)
+  presenceStore.update(presence())
+  clock.advance(4000)
+  await flush()
+  assert.equal(transport.sent.length, 0)
+  engine.dispose()
+})
+
 test('one-shot turn events are removed after delivery', async () => {
   const { clock, engine, transport } = harness({ turnDone: true })
   engine.begin(makeEvent({ kind: 'turn', oneShot: true }))

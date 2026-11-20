@@ -227,7 +227,7 @@ dsh-mobile-notify/
 | A11 | 审批在桌面/手机被处理 | pending 清除；客户端关闭对应通知；不再推 |
 | A12 | 重复事件/断线重连/多标签 | 同一 key 不重复推送；任一端 delivered 即抑制 |
 | A13 | turn-done 默认关 | 不推手机；App 内状态正常 |
-| A14 | 打开 turnDone 配置 | Client running true→false 时发 Web Notification；通知成功才 ack 并抑制 Server酱³；未授权/构造失败才回退；不生成浮动卡；仍不推子代理 |
+| A14 | 打开 turnDone 配置 | Client running true→false 时发 Web Notification；浏览器确认显示（onshow）才 ack 并抑制 Server酱³；未授权/构造失败/onerror 才回退；不生成浮动卡；仍不推子代理 |
 | A15 | `detail=summary/title/generic` | 字段逐级减少；`generic` 不含会话名、原因、工具名 |
 | A16 | 主机重启/插件重载 | 不补推历史；DSH 页面恢复后自行显示 pending |
 | A17 | Server酱³ TAG 配置 | 默认 `dsh` + `dsh-approval` 等；namespace/kindTags/extra 生效；顺序稳定、精确去重；`enabled=false` 时不发 `tags`；test 推送带 `dsh-test` |

@@ -426,6 +426,10 @@ export function apply(ctx: ClientContext): void {
       })
       turnNotifications.add(notification)
       notification.onclose = () => { turnNotifications.delete(notification) }
+      notification.onerror = () => {
+        turnNotifications.delete(notification)
+        console.debug('dsh-mobile-notify: turnDone notification was not shown')
+      }
       notification.onclick = () => {
         try {
           window.focus()
@@ -436,16 +440,21 @@ export function apply(ctx: ClientContext): void {
         notification.close()
         turnNotifications.delete(notification)
       }
-      // A successfully constructed browser Notification is the web delivery.
-      // Only this acknowledgement suppresses the Host's Server酱³ fallback.
-      const ackPayload = buildAckPayload(item, clientId, platform, true, 'web-notification', 'none')
-      postAck(ackPayload)
-      // The Host creates its turn record on turn/end. One delayed repeat covers
-      // the rare case where the status edge reaches the client first.
-      const retry = setTimeout(() => {
-        if (active) postAck(ackPayload)
-      }, 600)
-      ;(retry as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
+      // Ack only after the browser confirms display. A constructor call alone
+      // can succeed while raising `error` (for example on a denied permission).
+      let acked = false
+      notification.onshow = () => {
+        if (acked || !active) return
+        acked = true
+        const ackPayload = buildAckPayload(item, clientId, platform, true, 'web-notification', 'none')
+        postAck(ackPayload)
+        // The Host creates its turn record on turn/end. One delayed repeat
+        // covers the rare case where the status edge reaches the client first.
+        const retry = setTimeout(() => {
+          if (active) postAck(ackPayload)
+        }, 600)
+        ;(retry as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
+      }
     } catch (error) {
       // No notification means no delivered ack; the Host grace window may fall back.
       console.debug('dsh-mobile-notify: turnDone notification failed', error)

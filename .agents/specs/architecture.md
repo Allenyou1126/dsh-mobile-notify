@@ -432,6 +432,22 @@ interface ServerChan3Config {
   sendkey: string        // sctp...；只在 Host
   appPackage: string     // top.allenyou.dsh
   fallbackUrl: string    // 默认 publicBase
+  tags: TagConfig
+}
+
+interface TagConfig {
+  enabled: boolean
+  namespace: string
+  includeNamespace: boolean
+  includeKind: boolean
+  kindTags?: {
+    approval?: string
+    question?: string
+    planReview?: string
+    turn?: string
+    test?: string
+  }
+  extra: string[]
 }
 ```
 
@@ -439,6 +455,8 @@ interface ServerChan3Config {
 - 端点：`POST https://${uid}.push.ft07.com/send/${sendkey}.send`；不拼接 query，不记录完整 URL。
 - `transport=dryRun` 时不要求凭据；`transport=serverchan3` 缺凭据 → 插件加载失败。
 - 不把 SendKey 放进 `/mobile/config`、health、日志、通知或异常消息。
+- `tags` 只影响 Server酱³ 请求；`dryRun` 仍构建并记录，便于验证；其它未来 transport 不使用。
+- Tag 的官方语义、默认策略、校验和 App 侧用法见 §8.3。
 
 ### 8.2 请求
 
@@ -447,7 +465,7 @@ interface ServerChan3Config {
   "title": "DSH · 需要审批",
   "desp": "**会话**：重构数据库\n\n**审批**：bash 需要批准\n**原因**：要删除临时文件\n\n[打开 DSH 处理](scopen://top.allenyou.dsh?sessionId=abc&kind=approval&requestId=call1&sc.market=0&sc.fallback=https%3A%2F%2Fdsh.allenyou.top%2F)",
   "short": "重构数据库 · bash · 要删除临时文件",
-  "tags": "dsh|approval"
+  "tags": "dsh|dsh-approval"
 }
 ```
 
@@ -456,7 +474,60 @@ interface ServerChan3Config {
 - 超时/网络/5xx/429：最多重试 `pushRetries`（默认 2，总尝试 3），退避 500ms/1500ms；4xx 不重试。
 - 失败：写日志（状态码/错误码/脱敏消息），返回失败；不影响审批。
 
-### 8.3 内容与隐私档位
+### 8.3 TAG 分组（Server酱³）
+
+官方语义（已核对，2026-11-20）：
+
+- API 的 `tags` 是**单个字符串**，多个标签用竖线 `|` 分隔；不是数组。见 [Server酱³ API 文档](https://doc.ft07.com/zh/serverchan3/server/api)。
+- Server酱³ App 会按消息里的 Tag **自动聚合**，用户可以在侧边栏按 Tag 过滤消息、设置该 Tag 的阅读偏好；但**不能手工新增/改名/删除 Tag**；删掉全部包含某 Tag 的消息后 Tag 才会消失。见 [App 用户手册](https://doc.ft07.com/zh/serverchan3/app/use) 和 [常见问题](https://doc.ft07.com/zh/serverchan3/faq)。
+- 因此 TAG 是**低基数、稳定、可预测**的分组，不是动态元数据。本插件不把会话名、审批原因、sessionId、工具名等写进 Tag。
+
+默认策略：
+
+| 事件 | 默认 Tag | 用途 |
+|---|---|---|
+| 所有 DSH 消息 | `dsh` | App 里“全部 DSH”过滤 |
+| `approval` | `dsh-approval` | 需要审批；建议作为高优先级过滤入口 |
+| `question` | `dsh-question` | 需要回答；建议作为高优先级过滤入口 |
+| `plan-review` | `dsh-plan-review` | 计划确认 |
+| `turn` | `dsh-turn` | 可选的完成提醒；可过滤/调整阅读偏好 |
+| `test` | `dsh-test` | 设置行测试推送，便于识别和清理 |
+
+- 顺序固定：namespace → kind → extra；精确去重（保留首次出现），便于测试和阅读。
+- 默认 payload 的 `tags`：
+  - approval → `dsh|dsh-approval`
+  - question → `dsh|dsh-question`
+  - plan-review → `dsh|dsh-plan-review`
+  - turn → `dsh|dsh-turn`
+  - test → `dsh|dsh-test`
+- `tags.enabled=false`：完全不发送 `tags` 字段（不是空字符串）。
+- `includeNamespace=false`：不发送 catch-all Tag；`namespace` 仍用作默认 kind Tag 的前缀。
+- `includeKind=false`：不发送事件 Tag；只剩 namespace + extra。**test 不是事件**，仍会带 test Tag（`kindTags.test` 或派生的 `dsh-test`），便于识别测试消息。
+- `kindTags` 可逐项覆盖 kind Tag；键为 `approval`/`question`/`planReview`/`turn`/`test`，值为**最终 Tag**，不再自动加前缀。`includeKind=false` 时只忽略事件项，`test` 覆盖仍生效。
+- 整个 `tags` 块可省略，使用默认 `dsh` 分组（相当于下面的默认值全部生效）。
+- `extra` 追加到所有推送（含 test），用于跨服务/环境分组（如 `homelab`、`work`）；不要把动态内容放这里。
+- 生成后的 Tag 列表为空 → 省略 `tags` 字段；绝不发送空字符串。
+
+本项目约束（**不是** Server酱³ 官方 API 限制）：
+
+- 每个 Tag：1–32 个字符；正则 `^[\p{L}\p{N}._-]{1,32}$`（`u` 标志）；不允许空白、`|`、换行/控制字符；大小写敏感、保留原样（建议小写）。
+- 生成后的每个 Tag（含 `${namespace}-${kind}` 派生值）都必须满足 1–32；namespace 过长导致派生 Tag 超限时，配置加载失败。
+- 总 Tag 数 ≤8；`extra` ≤6（一条消息最多 namespace + 一个事件 Tag 或 test Tag + 6 = 8）。
+- 配置中的 Tag 非法/超长/去重后仍超限 → 插件加载失败；不在发送时静默截断。
+- 运行期再校验一次；意外非法 Tag 丢弃并 warning，不让一次推送因为 Tag 失败而阻塞。
+
+App 侧建议（插件无法替用户设置）：
+
+- 用 `dsh-approval` / `dsh-question` / `dsh-plan-review` 作为“需要处理”的过滤入口。
+- `turnDone=false` 时不会出现 `dsh-turn`；开启后若不想看完成提醒，可在 App 里过滤该 Tag 或调整阅读偏好。
+- 用 `dsh-test` 验证连通性；Tag 只有在出现含它的消息后才会进入 App 侧栏，所以先发测试推送，再设置过滤/阅读偏好；测完可删除这些消息（没有消息后对应 Tag 会消失）。
+- 多套部署/环境用 namespace 区分（如 `dsh-work`、`dsh-home`）；不要按会话/请求建 Tag。
+- Tag 是**消息级**而非会话级：同一会话的审批、提问、完成消息会进入不同的 Tag 分组。
+- 修改 namespace/kindTags/extra 不会重命名历史消息的 Tag；旧 Tag 会留到相关消息被删除为止。规划命名时保持稳定，避免频繁换名。
+
+本插件不把 TAG 用于 presence/ack、回退判断或推送开关；它只是消息分组元数据，不是权限或优先级机制。App 侧是否按 Tag 过滤、如何设置阅读偏好，由 App 和用户决定。官方没有给出 Tag 数量/长度的硬上限；上面的 8/32 是本项目为避免 App 侧边栏膨胀定的自用策略，若 Server酱³ 后续限制变化，改配置校验并补测试。
+
+### 8.4 内容与隐私档位
 
 | `detail` | 标题 | `short` | `desp` |
 |---|---|---|---|
@@ -470,7 +541,7 @@ interface ServerChan3Config {
 - `turn`：默认不推送；开启后只发“任务完成 + 会话标题”（按 privacy），不含最终答案正文。
 - 锁屏详情由 Server酱³ App 控制，插件无法强制隐藏；敏感时用 `detail=generic`。
 
-### 8.4 `scopen` 链接构造
+### 8.5 `scopen` 链接构造
 
 ```text
 scopen://<appPackage>?sessionId=<enc>&kind=<enc>[&requestId=<enc>]&sc.market=0&sc.fallback=<enc>
@@ -483,9 +554,9 @@ scopen://<appPackage>?sessionId=<enc>&kind=<enc>[&requestId=<enc>]&sc.market=0&s
 - `sc.market=0` 固定；`sc.fallback` 固定指向 `fallbackUrl`；不设 `sc.confirm`（默认 1，白名单后可被 Server酱³ 忽略）。
 - 不放 token/Cookie/SendKey/完整参数；`sc.` 前缀是 Server酱³ 保留键，不当作 extras。
 
-### 8.5 dryRun 与测试
+### 8.6 dryRun 与测试
 
-- `dryRun`：构造 payload、做与真实发送相同的校验/截断，但不发请求；日志只记录 `kind`、`sessionId` 短前缀、字段是否包含原因/标题，不记录完整 `desp`。
+- `dryRun`：构造 payload、做与真实发送相同的校验/截断，但不发请求；日志只记录 `kind`、`sessionId` 短前缀、字段是否包含原因/标题、生效的 Tag 列表（仅配置值），不记录完整 `desp`。
 - `/mobile/push/test` 在 `dryRun` 下返回 `202 { ok: true, dryRun: true }`；在 serverchan3 下真发并返回结果。
 - 测试推送不进入 pending/去重；可以更新 lastPush（用于 health），但不参与回退判断。
 
@@ -502,6 +573,20 @@ interface Config {
     sendkey?: string
     appPackage: string
     fallbackUrl?: string
+    tags: {
+      enabled: boolean
+      namespace: string
+      includeNamespace: boolean
+      includeKind: boolean
+      kindTags?: {
+        approval?: string
+        question?: string
+        planReview?: string
+        turn?: string
+        test?: string
+      }
+      extra: string[]
+    }
   }
   notify: {
     approval: boolean
@@ -541,6 +626,12 @@ interface Config {
 | `serverchan3.sendkey` | 无（serverchan3 时必填） | `sctp...`；仅 URL 安全字符 |
 | `serverchan3.appPackage` | `top.allenyou.dsh` | 包名正则 |
 | `serverchan3.fallbackUrl` | `publicBase` | http/https URL |
+| `serverchan3.tags.enabled` | `true` | boolean；false 时不发 `tags` |
+| `serverchan3.tags.namespace` | `dsh` | 1–32 Tag 字符；同时用作 catch-all 与 kind 前缀 |
+| `serverchan3.tags.includeNamespace` | `true` | boolean；是否发送 catch-all Tag |
+| `serverchan3.tags.includeKind` | `true` | boolean；是否发送事件 Tag |
+| `serverchan3.tags.kindTags` | 派生 | 可覆盖 `approval`/`question`/`planReview`/`turn`/`test` |
+| `serverchan3.tags.extra` | `[]` | ≤6 个 Tag；逐项校验；总 Tag ≤8 |
 | `notify.approval/question/planReview` | `true` | boolean |
 | `notify.turnDone` | `false` | boolean |
 | `notify.debounceMs` | 1500 | 0–10000 整数 |
@@ -555,7 +646,7 @@ interface Config {
 | `limits.pushTimeoutMs` | 8000 | 1000–30000 |
 | `limits.pushRetries` | 2 | 0–3 |
 
-未知字段：忽略（Cordis schema 默认行为）；不因未知字段失败。
+未知字段：忽略（Cordis schema 默认行为）；不因未知字段失败。`serverchan3.tags` 整块可省略，按上表默认值生效；TAG 的派生/去重/上限规则见 §8.3。
 
 ### 9.3 配置示例
 
@@ -572,6 +663,15 @@ interface Config {
           sendkey: 'sctp123tREDACTED'    # 不提交真实值
           appPackage: 'top.allenyou.dsh'
           fallbackUrl: 'https://dsh.allenyou.top/'
+          tags:
+            enabled: true
+            namespace: 'dsh'
+            includeNamespace: true
+            includeKind: true
+            # kindTags:                    # 可选：逐项覆盖默认 <namespace>-<kind>
+            #   approval: 'dsh-approval'
+            #   turn: 'dsh-turn'
+            extra: []                      # 可加环境/用途标签，最多 6 个
         notify:
           approval: true
           question: true
@@ -737,6 +837,7 @@ interface DshMobileBridge {
 - SendKey 只在 Host；`/mobile/config`、health、日志、通知、异常消息均不含。
 - 深链只带 `sessionId`/`kind`/`requestId`；不带 token/Cookie/任意 URL；Shell 只读白名单 extras（另一仓库）。
 - 通知内容按 `detail`/`privacy` 降级；`generic` 不含会话名/原因/工具名；不发代码/完整参数/审批全文。
+- Server酱³ Tag 只放配置的稳定分组，不放会话名/原因/sessionId/动态内容；Tag 对第三方可见，且会被 App 长期聚合。
 - 锁屏可见性由 Server酱³ App 控制；DSH 侧无法强制隐藏；敏感场景用 `generic`。
 - 日志不写请求体、Cookie、SendKey、完整 sessionId；只写短前缀/kind/delivered/状态码。
 - 通知内不提供批准/拒绝；点击只打开会话。
@@ -756,6 +857,7 @@ interface DshMobileBridge {
   - 请求错误：4xx + 通用错误体；
   - 推送错误：记录 + 返回失败，不影响审批；
   - 客户端错误：局部降级（无页内条/无通知），不阻塞 DSH UI。
+- 日志中的 Tag 只记录名称/数量（配置值），不记录动态内容；Tag 本身也可能被第三方看到，不能放密钥/内部 URL。
 - 不引入 metrics/tracing 依赖；需要时从日志和 health 读。
 
 ## 14. 测试映射
@@ -768,6 +870,7 @@ interface DshMobileBridge {
 | ack 早到/全部 false/超时/多端 | 状态机 + fake transport 单测 |
 | 路由认证/body/限流/方法 | fake ctx + mock req/res 单测 |
 | Server酱³ payload/detail/编码/重试 | 注入 fetch 的单测 + snapshot |
+| TAG 构建/覆盖/顺序/去重/空列表/字符与数量上限 | 纯函数单测 + 配置校验单测 |
 | bootstrap 302/头 | 路由单测 |
 | Client delivered 判定/去抖/桥重试 | 纯函数 + fake Document/Notification |
 | 构建/包注册 | 构建 smoke test |

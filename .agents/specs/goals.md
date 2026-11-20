@@ -57,6 +57,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 - 用服务端配置的 `uid` + `sendkey` 调 `POST https://<uid>.push.ft07.com/send/<sendkey>.send`。
 - 推送正文包含单行、正确 percent-encode 的 `scopen://top.allenyou.dsh?...` 深链；`sc.market=0`、`sc.fallback=<publicBase>`；不带 token/SendKey/代码/完整工具参数。
 - 支持 `detail=summary|title|generic` 隐私档位；默认 summary（用户已选择显示摘要）。
+- **TAG 分组**：默认 `dsh`（全部）+ `dsh-approval`/`dsh-question`/`dsh-plan-review`/`dsh-turn`/`dsh-test`；可配 namespace、是否发 catch-all/kind、逐项覆盖、额外 Tag。TAG 只做低基数、稳定分组，不用会话名/原因/sessionId 等动态内容；详细规则见 [architecture.md](architecture.md) §8.3。
 - 失败重试 2 次、超时 8s、默认最多 50 条/分钟；失败只写日志，**不阻塞审批链**。
 - `dryRun` 模式只记录 payload（脱敏），不发网络请求；首次安装/联调默认用它。
 - 实现是 Server酱³ **App 版**（`sctp...` SendKey），不是 Server酱 Turbo 的微信通道。
@@ -105,7 +106,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 
 ### G8 测试、文档与可维护性
 
-- 纯逻辑（决策状态机、payload、URL 编码、配置解析、presence TTL、限流、body 校验）有自动化测试，不依赖真机。
+- 纯逻辑（决策状态机、payload、TAG 构建/校验、URL 编码、配置解析、presence TTL、限流、body 校验）有自动化测试，不依赖真机。
 - 路由与事件用 fake `ctx` 驱动；客户端纯函数用 fake DOM/`Notification` 驱动。
 - 文档说明：安装、配置、隐私档位、故障排查、与 Shell 的契约边界、真机验证范围。
 - 质量门禁：`pnpm check`（类型检查 + 测试 + 构建）通过。
@@ -129,6 +130,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 | N13 | 多设备配对、设备撤销、推送 token 轮换 | 没有 deviceToken；依赖 DSH 会话 |
 | N14 | 浏览器通知的持久化/历史管理 | 交给操作系统；插件不保存通知内容 |
 | N15 | 公开上架、Play 发布、CI/CD 平台建设 | 自用；v1 只要求本地可构建 |
+| N16 | 每会话/每原因/每请求的动态 TAG | Server酱³ Tag 由消息自动聚合、不能手工改名/删除；动态 Tag 会膨胀 App 侧边栏并泄露会话信息 |
 
 ## 4. 交付物
 
@@ -182,6 +184,7 @@ dsh-mobile-notify/
 | 状态 | pending/presence/ack 全部在内存；重启不补推历史；DSH 自身状态负责 UI 恢复 |
 | 推送 | SendKey 只在 Host；不写日志、不进客户端、不进 `/mobile/config` |
 | 通知内容 | 默认摘要；`generic` 不含会话名/原因/工具名；不含代码/参数/全文 |
+| 通知 TAG | 只用配置的稳定分组；不含会话名/原因/sessionId 等动态内容；总数 ≤8 |
 | 深链 | 只带 `sessionId`/`kind`/`requestId`；不带 token/URL；单行 + percent-encode |
 | 契约 | v1 向后兼容；新增字段必须可缺省；破坏性变更先改 Shell 契约并升版本 |
 | 许可 | 复用旧插件代码时保留 BSD-3-Clause 声明；不把第三方代码洗成自有 |
@@ -192,9 +195,9 @@ dsh-mobile-notify/
 
 | 阶段 | 本仓库工作 | 出口标准 | 预估 |
 |---|---|---|---|
-| **M1 Host 核心** | 配置/schema、事件观察、去抖、pending、presence/ack、决策状态机、路由、Server酱³ 适配器、health/config/test push | `curl`/测试可触发 bootstrap、presence、ack、dryRun 推送；错误 Origin/超限被拒；自动审批不产生推送 | 3–5 天 |
+| **M1 Host 核心** | 配置/schema（含 TAG）、事件观察、去抖、pending、presence/ack、决策状态机、路由、Server酱³ 适配器、health/config/test push | `curl`/测试可触发 bootstrap、presence、ack、dryRun 推送；TAG 默认/覆盖/去重正确；错误 Origin/超限被拒；自动审批不产生推送 | 3–5 天 |
 | **M2 Client 与 Web 通知** | `sessionStatus` 观察、页内条、Web Notification、presence/ack、`window.__dshMobile`、设置行 | 桌面可见/隐藏/权限拒绝三条路径都正确；任一端 delivered 抑制推送；桥可打开会话 | 3–4 天 |
-| **M2.5 安装与替换** | 构建、安装到目标 profile、配置 `publicBase`/`transport`、停用 `dsh-web-ui-notify`、测试推送 | profile 只保留一套通知；页面加载无报错；health 正常 | 1–2 天 |
+| **M2.5 安装与替换** | 构建、安装到目标 profile、配置 `publicBase`/`transport`/TAG、停用 `dsh-web-ui-notify`、测试推送 | profile 只保留一套通知；页面加载无报错；health 正常；Server酱³ App 侧栏出现 `dsh`/`dsh-test` 且可按 Tag 过滤 | 1–2 天 |
 | **M3 联调支持** | 与 [dsh-android-shell](../../../dsh-android-shell) 联合验证：`scopen`、关联启动、前后台 presence、锁屏推送、权限拒绝/恢复 | DECISION §6 的场景在真机通过；未通过项有明确记录 | 3–4 天（联合） |
 | **M4 硬化与发布** | 隐私档位回归、错误处理、R8/签名不在本仓库、README/DETAIL、版本与安装说明 | 连续日常使用 3 天；无长连接/常驻；可重复安装；文档可排障 | 2–3 天 |
 
@@ -224,6 +227,7 @@ dsh-mobile-notify/
 | A14 | 打开 turnDone 配置 | 完成事件按同一 presence/ack 规则推送；仍不推子代理（无法可靠判定时保守不推） |
 | A15 | `detail=summary/title/generic` | 字段逐级减少；`generic` 不含会话名、原因、工具名 |
 | A16 | 主机重启/插件重载 | 不补推历史；DSH 页面恢复后自行显示 pending |
+| A17 | Server酱³ TAG 配置 | 默认 `dsh` + `dsh-approval` 等；namespace/kindTags/extra 生效；顺序稳定、精确去重；`enabled=false` 时不发 `tags`；test 推送带 `dsh-test` |
 
 ### 7.2 安全与错误
 
@@ -238,6 +242,8 @@ dsh-mobile-notify/
 | S7 | transport=serverchan3 缺 sendkey，或 uid 无法从 sendkey 解析 | 插件加载失败，错误说明缺什么；不静默降级 |
 | S8 | 推送上游超时/500 | 重试 2 次后记录失败；审批链不受影响 |
 | S9 | 日志中的会话 id | 只打短前缀/kind/delivered；不打审批全文 |
+| S10 | TAG 中含会话名/原因/sessionId/SendKey | 不允许；TAG 只来自配置的稳定分组，不含动态内容 |
+| S11 | TAG 非法/超长/超过数量上限 | 插件加载失败并说明字段；不在发送时静默截断（运行期意外值丢弃并 warning） |
 
 ### 7.3 工程
 
@@ -259,7 +265,7 @@ dsh-mobile-notify/
 2. 新增/变更行为已更新 `.agents/specs`（协议变更还要同步 Shell 契约）；
 3. 该里程碑“出口标准”中的场景已实际执行（自动化或手工），结果记录在 PR/commit 说明中；
 4. 没有把未验证项写成“已通过”；真机项明确标 M3；
-5. 没有引入 N1–N15 中的非目标；
+5. 没有引入 N1–N16 中的非目标；
 6. 没有提交 Secrets、构建产物或 profile 路径。
 
 **整个仓库的完成**：M1–M2.5 完成、M3 真机场景通过、M4 连续使用 3 天；默认安装后没有常驻服务/长连接，且 `dsh-web-ui-notify` 已停用。
@@ -288,4 +294,5 @@ dsh-mobile-notify/
 | 浏览器通知权限默认拒绝 | Web 通知不弹 | 设置行引导 + ack false 回退；页内条仍在 |
 | 第三方看到审批摘要 | 隐私泄露 | `detail` 降级；不发代码/完整参数；锁屏详情由 Server酱³ 控制 |
 | 摘要含 Markdown 特殊字符 | Server酱³ 排版/链接损坏 | 值去换行/控制字符并截断；链接固定标签、单行、percent-encode |
+| 动态/过多 TAG | App Tag 侧边栏膨胀、泄露会话信息 | 低基数固定 Tag；每类事件一个 Tag；总数 ≤8；禁止动态内容 |
 | 目标机/Server酱³ 不可用 | 无法验收 | `dryRun` + fake transport 完成 M1/M2；真机失败记录为风险，不伪造通过 |

@@ -22,6 +22,7 @@
 | 包管理器 | pnpm | DSH profile 使用 pnpm；本地插件安装一致 |
 | 状态 | 纯内存（Map/Set） | pending 可从 DSH 重建；重启不补推历史正是需求 |
 | 回退通道 | Server酱³ App（`serverchan3`；联调用 `dryRun`） | 个人环境唯一“无 GMS、无长连接、可深链”的组合 |
+| Server酱³ 分组 | 低基数 TAG：namespace + 每类事件 + extra | 利用 App 的 Tag 过滤/阅读偏好；避免动态 Tag 膨胀 |
 | 明确不实现 | FCM / Mi Push / WorkManager / SSE / FGS / Web Push / deviceToken / 第三方 relay | 见 §12 被否方案 |
 | 类型来源 | 本机安装的 DSH `0.2.2-rc.5`（devDependencies 或离线 link farm） | 不凭记忆写 API；不把 DSH 类型 vendor 进仓库 |
 | DSH 兼容 | `engines.dsh: 0.2.2-rc.5`（精确锁定） | 客户端 API 在 rc 之间会变；升版必须回归 |
@@ -258,6 +259,7 @@ await build({
 | presence | TTL 过期、web/shell 平台、visible/focused 组合、clientId 覆盖、异常字段拒绝 |
 | ack | delivered true 抑制、全部 false 才推、重复 ack 幂等、非法枚举拒绝、可选 callId 关联 |
 | Server酱³ | payload 字段、detail 三档、单行链接、percent-encode、sc. 保留键、超时/重试/限流、失败不抛 |
+| Server酱³ TAG | 默认/覆盖/顺序/去重/空列表/字符与数量上限/`enabled=false`；test 用 test Tag |
 | 路由 | bootstrap 302/`Cache-Control`、错误 Origin、缺 Cookie、Content-Type、2KB、429、错误 method |
 | 配置 | 默认值、非法 publicBase、serverchan3 缺凭据、未知字段忽略、数值边界 |
 | 客户端纯函数 | delivered 判定、`via/reason`、通知 tag 去重、500ms 去抖取消、页面隐藏/聚焦、权限 unsupported/denied |
@@ -287,6 +289,8 @@ await build({
 - `publicBase`：必填，外部可访问的 DSH 基址（`https://dsh.allenyou.top/`）。
 - `transport`：`serverchan3` / `dryRun`（默认 `dryRun`，首次安装不误发）。
 - `serverchan3.uid/sendkey`：仅 `transport=serverchan3` 时必填；`appPackage`/`fallbackUrl` 有默认值。
+- `serverchan3.tags.*`：`enabled`、`namespace`、`includeNamespace`、`includeKind`、`kindTags`、`extra`；默认 `dsh` + `dsh-<kind>`，只做低基数分组。
+- **TAG 的用法**：官方 API 的 `tags` 是 `|` 分隔的字符串，App 会按消息自动聚合 Tag、允许过滤/阅读偏好，但不能手工改名/删除；所以只用稳定、低基数的分组，不用会话名/原因/sessionId。细节见 [architecture.md](architecture.md) §8.3。
 - `notify.*`：事件开关、`debounceMs`、`graceMs`、`detail`、`inPageCountsAsDelivered`、`webNotification`、`inPage`。
 - `privacy.*`：会话标题/原因/工具名是否进入摘要。
 - `limits.*`：body 大小、限流、推送超时/重试/每分钟上限。
@@ -303,7 +307,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 - 本地目录安装时 `lib/` 必须已构建；`.gitignore` 忽略 `lib/`，不要从干净 checkout 直接安装。
 - 目标 profile 中停用/移除 `dsh-web-ui-notify`；两者并存会重复通知。
 - **必须用本地路径安装**；不要按包名从 registry 安装，以免拿到同名社区包 `dsh-mobile-notify`。
-- 先 `transport: dryRun` 验证 presence/ack/页内条，再切 `serverchan3` 做真实推送。
+- 先 `transport: dryRun` 验证 presence/ack/页内条，再切 `serverchan3` 做真实推送；发一次测试推送让 `dsh`/`dsh-test` Tag 出现在 App 侧栏，再设置 Tag 过滤/阅读偏好。
 - nginx：整个 `/mobile/` 前缀（至少 bootstrap/config/presence/ack/push/test/health）走现有 oauth2-proxy；不需要 SSE 的 `proxy_buffering off`，不新增长连接配置。若现有代理只精确匹配了旧路径，需要补上新增路径。
 - `publicBase` 必须是外部 origin；不要填 `http://127.0.0.1:...`（除非本地开发）。
 - DSH 必须只绑 loopback；`/mobile/bootstrap` 不能直接暴露公网。
@@ -326,6 +330,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 | 秘密 | SendKey 只在 Host 配置；不进客户端、日志、通知、health/config |
 | 深链 | 只带 `sessionId`/`kind`/`requestId`；不读任意 extras；sessionId 长度/字符集校验 |
 | 推送内容 | 默认摘要；`generic` 无会话名/原因/工具名；不含代码/参数/全文；无审批动作 |
+| 推送 TAG | 只放配置的稳定分组（namespace/kind/extra）；不放会话名/原因/sessionId/SendKey；第三方可见 |
 | 日志 | 只打短 sessionId、kind、delivered、状态码；不打 body/Cookie/SendKey |
 | 错误 | 对外统一错误码，不回传上游响应体/堆栈 |
 | 常驻 | Host 无常驻连接；Client 仅可见时 10s 心跳；隐藏停止 |
@@ -381,6 +386,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 | deviceToken/`/mobile/pair` | Client 在已认证页面内运行，DSH Cookie 已足够；减少秘密与攻击面 |
 | FastPush 零点击拉起 | 会打断当前操作；不是默认行为 |
 | 在通知里批准/拒绝 | 必须看上下文；安全边界 |
+| 每会话/每原因动态 TAG | Server酱³ Tag 自动聚合且不能手工改名/删除，会膨胀侧栏并泄露会话信息 |
 | Playwright 作为 v1 门禁 | 环境/账号/真机依赖重；手工清单更诚实 |
 
 ## 13. 许可与第三方代码

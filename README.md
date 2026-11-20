@@ -1,6 +1,6 @@
 # dsh-mobile-notify
 
-DeepSeek Harness 的 Web 通知插件（Host + Client bundle）：页面/桌面优先提醒，只有“Web 未成功提醒 + 手机不在前台”时才回退到 Server酱³ App；与 Android 薄壳 [dsh-android-shell](../dsh-android-shell) 配套，用 `scopen` 深链回到对应会话。
+DeepSeek Harness 的 Web 通知插件（Host + Client bundle）：页面/桌面优先提醒，只有“Web 未成功提醒 + 手机不在前台”时才回退到 Server酱³ App；与 Android 薄壳 [dsh-android-shell](../dsh-android-shell) 配套，用 `scopen` 深链回到对应会话；Server酱³ 推送带低基数 TAG（`dsh` / `dsh-approval` / …），便于在 App 内过滤。
 
 - Agent 文档入口：[.agents/specs/README.md](.agents/specs/README.md)
 - 实施目标与验收：[.agents/specs/goals.md](.agents/specs/goals.md)

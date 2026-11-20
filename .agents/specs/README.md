@@ -9,7 +9,7 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 - 观察 DSH 的审批、提问/计划审批和（可选）turn-done 事件；
 - 在网页内用**页内提示 + 浏览器系统通知**优先提醒；
 - 用 presence/ack 判断“Web 是否真的提醒到人”，只在 **Web 未成功提醒且手机 App 不在前台**时，调用 **Server酱³ App** 推送；
-- 推送正文带 `scopen://top.allenyou.dsh?...`，由 Android 薄壳接收并回到对应会话；
+- 推送正文带 `scopen://top.allenyou.dsh?...`，由 Android 薄壳接收并回到对应会话；Server酱³ 消息带低基数 TAG（`dsh` / `dsh-<kind>`），便于 App 内过滤；
 - 提供 `window.__dshMobile.openSession/setForeground` JS 桥、设置行、测试推送和健康检查。
 
 ## 本仓库不是什么
@@ -40,7 +40,7 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 |---|---|
 | [goals.md](goals.md) | 实施目标、非目标、交付物、里程碑、验收清单、完成定义 |
 | [tech-stack.md](tech-stack.md) | 语言/运行时/框架/构建/测试/依赖/部署/安全/兼容性选型与理由，以及被否方案 |
-| [architecture.md](architecture.md) | 组件与数据流、事件归一化、presence/ack 状态机、HTTP 与 JS 桥、Server酱³ 适配、模块划分、配置 schema、测试策略 |
+| [architecture.md](architecture.md) | 组件与数据流、事件归一化、presence/ack 状态机、HTTP 与 JS 桥、Server酱³ 适配（含 TAG 分组）、模块划分、配置 schema、测试策略 |
 
 ## 命名
 

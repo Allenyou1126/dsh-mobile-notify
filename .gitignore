@@ -3,8 +3,8 @@ node_modules/
 *.log
 pnpm-debug.log*
 
-# Build output (rebuild with `pnpm build` before local install)
-lib/
+# Published bundle output: committed so `dsh plugin add github:...` works.
+# Rebuild with `npm run build` before every release.
 coverage/
 *.tsbuildinfo
 

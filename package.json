@@ -4,6 +4,23 @@
   "private": true,
   "type": "module",
   "description": "Web-first notifications for DeepSeek Harness approvals/questions, with Server酱³ App fallback and scopen deep links.",
+  "author": "Allenyou1126",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Allenyou1126/dsh-mobile-notify.git"
+  },
+  "homepage": "https://github.com/Allenyou1126/dsh-mobile-notify#readme",
+  "bugs": {
+    "url": "https://github.com/Allenyou1126/dsh-mobile-notify/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "notifications",
+    "serverchan",
+    "web-notification"
+  ],
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",

@@ -94,7 +94,7 @@ function makeContext(): FakeContext {
   return { ctx: ctx as unknown as HostContext, routes, listeners, cleanups }
 }
 
-test('apply registers the six routes and the three event observers', () => {
+test('apply registers seven exact paths (nine method handlers) and three event observers', () => {
   const fake = makeContext()
   apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
   assert.deepEqual([...fake.routes.keys()].sort(), [
@@ -104,6 +104,7 @@ test('apply registers the six routes and the three event observers', () => {
     '/mobile/health',
     '/mobile/presence',
     '/mobile/push/test',
+    '/mobile/settings',
   ])
   assert.deepEqual([...fake.listeners.keys()].sort(), [
     'approval/request',
@@ -157,6 +158,24 @@ test('presence and health routes work through the fake connection', async () => 
   assert.equal(payload.pending, 0)
   assert.equal(payload.presence.web, 1)
   assert.doesNotMatch(healthRes.body, /sctp|sendkey|publicBase/u)
+  for (const cleanup of fake.cleanups.reverse()) cleanup()
+})
+
+test('settings route shares one path for GET and PUT', async () => {
+  const fake = makeContext()
+  apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
+  const route = fake.routes.get('/mobile/settings')
+  assert.ok(route !== undefined)
+
+  const getRes = makeResponse()
+  await route.handler(makeRequest('GET'), getRes)
+  assert.equal(getRes.status, 200)
+  const view = JSON.parse(getRes.body) as { editable: boolean; settings: object }
+  assert.equal(view.editable, false)
+
+  const putRes = makeResponse()
+  await route.handler(makeRequest('PUT', { settings: view.settings }), putRes)
+  assert.equal(putRes.status, 503)
   for (const cleanup of fake.cleanups.reverse()) cleanup()
 })
 

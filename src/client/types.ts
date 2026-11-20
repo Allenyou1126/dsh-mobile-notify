@@ -34,7 +34,8 @@ export interface SessionStatus {
 
 export interface SlotOptions {
   readonly name: string
-  readonly id: string
+  readonly id?: string
+  readonly key?: string
   readonly order?: number
   readonly locale?: string
 }
@@ -69,6 +70,8 @@ export interface ClientContext {
   uiWorkspace: ClientWorkspace
   effect: (callback: () => (() => void) | void, label?: string) => void
 }
+
+export type TestResult = 'ok' | 'dryRun' | 'failed'
 
 export type ClientPlatform = 'web' | 'android-shell'
 export type DetailLevel = 'summary' | 'title' | 'generic'

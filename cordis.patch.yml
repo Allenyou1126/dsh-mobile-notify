@@ -2,9 +2,15 @@
 #
 # The browser half is discovered through package.json's `dsh.client` and
 # exports["./client"]. The Host half owns routes, events, presence/ack, and the
-# Server酱³ fallback. `publicBase` is intentionally not baked in here; provide
-# it (and transport credentials) in the profile's cordis.patch.yml.
+# Server酱³ fallback. Non-secret settings are edited in
+# Plugins → 移动通知 → Configuration; SendKey is stored in DSH credentials.
+# This default lets the plugin start and expose that page before any file edit.
 
 - insert:
     - id: dsh-mobile-notify
       name: 'dsh-mobile-notify'
+      config:
+        # Personal deployment default so the plugin can start and open its
+        # Configuration page before any file edit. Change it in the page or
+        # override this row in the profile patch.
+        publicBase: 'https://dsh.allenyou.top/'

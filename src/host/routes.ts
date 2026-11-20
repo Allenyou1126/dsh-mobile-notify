@@ -5,6 +5,7 @@ import type { Clock } from './clock.ts'
 import type { DecisionEngine } from './decision.ts'
 import type { PresenceStore } from './presence.ts'
 import { RateLimiter } from './rate-limit.ts'
+import { SettingsError, type SettingsService } from './settings.ts'
 import type {
   AckInput,
   AckReason,
@@ -44,6 +45,7 @@ export interface RoutesDeps {
   clock: Clock
   version: string
   health: { lastPush?: LastPush }
+  settings: SettingsService
   sendTest: (signal: AbortSignal) => Promise<PushResult>
 }
 
@@ -356,20 +358,30 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   const ipLimiter = new RateLimiter(deps.clock)
   const clientLimiter = new RateLimiter(deps.clock)
   const pushLimiter = new RateLimiter(deps.clock)
+  const settingsLimiter = new RateLimiter(deps.clock)
   const disposers: Array<() => void> = []
 
-  const register = (
-    method: 'GET' | 'POST',
-    path: string,
-    run: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void,
-  ): void => {
+  type RouteMethod = 'GET' | 'POST' | 'PUT'
+  type RouteRunner = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void
+  const handlersByPath = new Map<string, { handlers: Partial<Record<RouteMethod, RouteRunner>> }>()
+
+  // DSH permits one exact route per pathname, so methods share one registration.
+  const register = (method: RouteMethod, path: string, run: RouteRunner): void => {
+    const existing = handlersByPath.get(path)
+    if (existing !== undefined) {
+      existing.handlers[method] = run
+      return
+    }
+    const handlers: Partial<Record<RouteMethod, RouteRunner>> = { [method]: run }
+    handlersByPath.set(path, { handlers })
     disposers.push(context.webServer.register({
       kind: 'exact',
       path,
       handler: async (req, res) => {
         try {
-          if (req.method !== method) {
-            sendMethodNotAllowed(res, method)
+          const runner = req.method === undefined ? undefined : handlers[req.method as RouteMethod]
+          if (runner === undefined) {
+            sendMethodNotAllowed(res, Object.keys(handlers).join(', '))
             req.resume()
             return
           }
@@ -379,7 +391,7 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
             return
           }
           ipLimiter.prune(60_000)
-          await run(req, res)
+          await runner(req, res)
         } catch (error) {
           deps.logger.error(`dsh-mobile-notify: ${req.method ?? '?'} ${path} failed`, error)
           if (!res.writableEnded) sendError(res, 500, 'internal_error')
@@ -388,6 +400,7 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
     }))
   }
 
+  try {
   register('GET', '/mobile/bootstrap', (_req, res) => {
     bootstrap(res, deps, context.connection)
   })
@@ -460,6 +473,47 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
     if (!authorize(req, res, context.connection)) return
     sendJson(res, 200, health(deps.config, deps))
   })
+
+  register('GET', '/mobile/settings', async (req, res) => {
+    if (!authorize(req, res, context.connection)) return
+    const view = await deps.settings.read()
+    sendJson(res, 200, view)
+  })
+
+  register('PUT', '/mobile/settings', async (req, res) => {
+    if (!authorize(req, res, context.connection)) return
+    if (!settingsLimiter.take(ipKey(req), 20, 60_000)) {
+      sendRateLimited(res)
+      req.resume()
+      return
+    }
+    const body = await readJson(req, res, 16_384)
+    if (!body.ok) {
+      if (!res.writableEnded) sendError(res, 400, 'invalid_request', body.message)
+      return
+    }
+    try {
+      const result = await deps.settings.write(body.value as Parameters<SettingsService['write']>[0])
+      sendJson(res, 200, result)
+    } catch (error) {
+      if (error instanceof SettingsError) {
+        sendError(res, error.status, error.status === 400 ? 'invalid_settings' : 'settings_unavailable', error.message)
+        return
+      }
+      throw error
+    }
+  })
+
+  } catch (error) {
+    for (const dispose of disposers.reverse()) {
+      try {
+        dispose()
+      } catch {
+        // A failed registration must not leave earlier routes behind.
+      }
+    }
+    throw error
+  }
 
   return () => {
     for (const dispose of disposers.reverse()) {

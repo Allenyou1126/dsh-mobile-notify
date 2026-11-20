@@ -76,6 +76,7 @@ test('dryRun does not call fetch and returns a dry-run result', async () => {
     config: config(),
     logger: quietLogger,
     clock: new FakeClock(),
+    sendkey: async () => undefined,
     fetchImpl: async url => {
       calls.push(url)
       return new Response('{}', { status: 200 })
@@ -91,10 +92,11 @@ test('serverchan3 sends JSON with tags and never includes the SendKey in the bod
   const transport = new ServerChanTransport({
     config: config({
       transport: 'serverchan3',
-      serverchan3: { sendkey: 'sctp42tTOKEN' },
+      serverchan3: { appPackage: 'top.allenyou.dsh' },
     }),
     logger: quietLogger,
     clock: new FakeClock(),
+    sendkey: async () => 'sctp42tTOKEN',
     fetchImpl: async (url, init) => {
       calls.push({ url, init })
       return new Response(JSON.stringify({ code: 0 }), { status: 200 })
@@ -121,11 +123,12 @@ test('upstream failures are reported, not thrown', async () => {
   const transport = new ServerChanTransport({
     config: config({
       transport: 'serverchan3',
-      serverchan3: { sendkey: 'sctp42tTOKEN' },
+      serverchan3: { appPackage: 'top.allenyou.dsh' },
       limits: { pushRetries: 0 },
     }),
     logger,
     clock: new FakeClock(),
+    sendkey: async () => 'sctp42tTOKEN',
     fetchImpl: async () => new Response('{}', { status: 500 }),
   })
   const result = await transport.send(makeEvent(), new AbortController().signal)
@@ -139,11 +142,12 @@ test('network error text is redacted before it reaches the result', async () => 
   const transport = new ServerChanTransport({
     config: config({
       transport: 'serverchan3',
-      serverchan3: { sendkey: 'sctp42tTOKEN' },
+      serverchan3: { appPackage: 'top.allenyou.dsh' },
       limits: { pushRetries: 0 },
     }),
     logger: { ...quietLogger, warn: (...args: unknown[]) => { warnings.push(args) } },
     clock: new FakeClock(),
+    sendkey: async () => 'sctp42tTOKEN',
     fetchImpl: async () => {
       throw new Error('request failed for sctp42tTOKEN')
     },
@@ -160,11 +164,12 @@ test('outbound rate limit blocks a second push in the same minute', async () => 
   const transport = new ServerChanTransport({
     config: config({
       transport: 'serverchan3',
-      serverchan3: { sendkey: 'sctp42tTOKEN' },
+      serverchan3: { appPackage: 'top.allenyou.dsh' },
       limits: { pushPerMinute: 1 },
     }),
     logger: quietLogger,
     clock: new FakeClock(),
+    sendkey: async () => 'sctp42tTOKEN',
     fetchImpl: async () => {
       calls += 1
       return new Response(JSON.stringify({ code: 0 }), { status: 200 })

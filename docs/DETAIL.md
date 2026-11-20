@@ -18,18 +18,19 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 必须做：
 
-1. 在 profile 配置里提供 `publicBase`（外部可访问的 DSH 地址）。
-2. 停用/移除 `dsh-web-ui-notify`，避免重复通知。
-3. 首次联调用 `transport: dryRun`；确认 presence/ack/页内条正常后再切 `serverchan3`。
-4. Server酱³ 使用 App 版 `sctp...` SendKey；确认手机 App 通知权限、MiPush 和 `scopen` 关联启动已放行。
+1. 打开 **Plugins → 移动通知 → Configuration**。bundle 自带 `publicBase: https://dsh.allenyou.top/` 默认值；如部署地址不同，在配置卡里改“DSH 外部地址”。
+2. 首次联调保持 `dryRun`；确认 presence/ack/页内条正常，再在配置卡里切 `Server酱³`。
+3. 在配置卡填写 App 版 `sctp...` SendKey。它写入 DSH `credentials`，不会出现在 profile 配置或客户端响应中；可随时清除。
+4. 确认手机 App 通知权限、MiPush 和 `scopen` 关联启动已放行。
+5. 旧通知插件应已移除（本次安装已执行）；不要与 `dsh-web-ui-notify` 同时启用。
 
-配置示例、完整字段和 TAG 规则见仓库 `.agents/specs/architecture.md` §8.3 / §9；本文件不重复维护。
+配置卡保存普通字段后 DSH 会重启本插件；“保存请求已发出，正在确认…”期间不要重复提交。完整字段和 TAG 规则见仓库 `.agents/specs/architecture.md` §8.3 / §9 / §10；本文件不重复维护。
 
 ## TAG 用法
 
 - `dsh`：全部 DSH 消息。
 - `dsh-approval` / `dsh-question` / `dsh-plan-review`：需要处理的入口。
-- `dsh-test`：设置行的测试推送；可在 App 内单独过滤/清理。
+- `dsh-test`：配置卡“发送测试推送”的测试消息；可在 App 内单独过滤/清理。
 - 不使用会话名/原因/sessionId 做动态 Tag；Tag 总数默认 ≤8，`extra` ≤6。
 - Tag 只有在出现含它的消息后才会出现在 App 侧栏；先发一次测试推送再设置过滤偏好。
 
@@ -45,7 +46,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 ## 排障
 
 - `/mobile/health`：查看 transport、pending/presence 计数、最近推送结果（需 DSH 登录）。
-- 设置行“发送测试推送”：验证 Server酱³ 链路与 TAG。
+- 配置卡“发送测试推送”：验证 Server酱³ 链路与 TAG；dryRun 时只记录不发送。
 - 页内条不出现：检查 `shell.bottom` 是否被其它插件占用，或 `notify.inPage=false`。
 - 手机收不到：先测 App 通知权限/MiPush；再测 `scopen` 拉起；最后看 Host 日志中的 `upstream_failed` / `rate_limited`。
 - `/mobile/bootstrap` 必须经 oauth2-proxy，DSH 只绑 loopback；不要直接公网暴露。

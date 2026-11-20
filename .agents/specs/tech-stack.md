@@ -15,7 +15,7 @@
 | HTTP 服务 | DSH `ctx.webServer.register` + Node `IncomingMessage/ServerResponse` | 不引入 Express/Koa；只注册 6 个精确路由 |
 | 认证 | DSH 浏览器 Cookie + `ctx.connection.requestRejection/admit` | 不引入 deviceToken/配对；复用现有 oauth2 会话 |
 | 外发 HTTP | Node 内置 `fetch` + `AbortSignal.timeout` | 零第三方依赖；足够处理一次 JSON POST |
-| 客户端 UI | React 18（DSH 前端模块表提供）+ DSH 插槽 | 官方扩展点；主题/语言/设置行一致 |
+| 客户端 UI | React 18（DSH 前端模块表提供）+ DSH 插槽 | 官方扩展点；主题/语言/插件页配置卡一致 |
 | 客户端通知 | `Notification` API（页面存活期） | 没有 Service Worker/Web Push；页面关闭后由 Host 回退 |
 | 构建 | esbuild + `tsc --noEmit` | Host ESM、Client CJS `__ModuleLoader__` 手写包装，esbuild 最直接 |
 | 测试 | Node 内置 `node:test` + `node:assert/strict` | 零测试框架依赖；Node 24 可直接跑 `.ts` |
@@ -102,6 +102,8 @@
 - insert:
     - id: dsh-mobile-notify
       name: 'dsh-mobile-notify'
+      config:
+        publicBase: 'https://dsh.allenyou.top/'
 ```
 
 - **单包**：Host 根导出与 Client `./client` 同包；一次安装、一份版本号。
@@ -118,13 +120,14 @@ export function apply(ctx: Context, config: Config): void { ... }
 ```
 
 - 所有监听器用 `ctx.on(..., { prepend: true })` 或等价格式注册，随 plugin fiber 释放。
-- 所有路由用 `ctx.effect(() => ctx.webServer.register({ kind: 'exact', path, handler }), ...)`；dispose 时自动移除。
+- 所有路由由 `registerRoutes()` 一次性注册；同一 path 的 GET/PUT 在 handler 内按 method 分派（DSH 不允许重复 exact path）。注册失败时先撤销已注册路由再抛错，避免 HMR 残留半套路由。
 - `sessionTitle` 是可选服务：`ctx.get('sessionTitle')`，缺失时用短 sessionId，不阻塞加载。
 - 不注入 `approval`/`userQuestions` 服务（只观察事件），避免不必要的加载顺序依赖。
 - 加载失败策略：
-  - `publicBase` 缺失/非法 → Config 校验失败；
-  - `transport=serverchan3` 但 sendkey 缺失/uid 无法解析 → `apply` 抛错，插件加载失败；
+  - `publicBase` 缺失/非法 → Config 校验失败；bundle patch 给 `https://dsh.allenyou.top/` 默认值，安装后即可进配置页；
+  - `transport=serverchan3` 无 SendKey → 插件仍加载，发送时返回 credentials missing；配置卡可写入 SendKey；
   - `webServer`/`connection`/`sessions` 缺失 → 依赖注入失败，不静默降级。
+- SendKey 通过 `ctx.get('credentials')` 读取，不进入 Config；配置卡保存走 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`。
 
 ### 3.3 Client 入口
 
@@ -134,7 +137,7 @@ export function apply(ctx: Context): void { ... }
 ```
 
 - 用 `ctx.slots.inject('shell.bottom', ...)` 注册页内条；该槽不存在时只告警，不退回 DOM hack。
-- 用 `ctx.slots.inject('settings.general.item', ...)` 注册设置行；该槽不存在时跳过。
+- 用 `ctx.slots.inject('plugins.bundle.config', ...)` 在 **Plugins → 移动通知 → Configuration** 注册配置卡（`key = dsh-mobile-notify`）；该槽不存在时跳过，数据走 Host `/mobile/settings`。不依赖 `configForms.whileServed`，因为普通字段不是 `.volatile()`；这是与 `dsh-context` 的实现差异。
 - 用 `ctx.locale.register(NS, { zh, en })` 注册运行时文案；`locale/*.json` 供 Plugin Manager 的 `meta.*` 使用。
 - 注入 `window.__dshMobile`；在 `ctx.effect` 的清理里删除本插件设置的同名全局（仅当仍是本次注入的对象）。
 - 不 import `react-dom`；React/JSX runtime 由 DSH 模块表提供。不打包 React。
@@ -149,7 +152,7 @@ export function apply(ctx: Context): void { ... }
 | `/mobile/config` | GET | DSH Cookie + Origin | 客户端需要的非敏感开关（本仓库的兼容性扩展） |
 | `/mobile/presence` | POST | DSH Cookie + Origin | presence 心跳 |
 | `/mobile/ack` | POST | DSH Cookie + Origin | delivered/failed 回执 |
-| `/mobile/push/test` | POST | DSH Cookie + Origin | 设置行测试推送 |
+| `/mobile/push/test` | POST | DSH Cookie + Origin | 配置卡测试推送 |
 | `/mobile/health` | GET | DSH Cookie + Origin | 非敏感诊断 |
 
 - 全部 `kind: 'exact'`；`Cache-Control: no-store`；不设 CORS 头；不走 Express 中间件。
@@ -231,7 +234,7 @@ await build({
 ```
 
 - banner/footer 的 `id` 必须等于包名；否则 bundle 能加载但注册不到插件。
-- 不引入 CSS Modules/lightningcss；页内条与设置行用 React 内联 `style` + DSH 主题 CSS 变量。减少一条构建链。
+- 不引入 CSS Modules/lightningcss；页内条与插件页配置卡用 React 内联 `style` + DSH 主题 CSS 变量。减少一条构建链。
 - 不用 `tsup`/`vite`/`webpack`；这个插件只有两个入口。
 
 ### 5.3 类型来源
@@ -290,9 +293,11 @@ await build({
 
 配置通过 Cordis 插件行传入（与 DSH bundle 规范一致）。示例见 [architecture.md](architecture.md) §9；关键字段：
 
-- `publicBase`：必填，外部可访问的 DSH 基址（`https://dsh.allenyou.top/`）。
+- `publicBase`：schema 必填；bundle patch 默认 `https://dsh.allenyou.top/`，可在配置卡修改。
 - `transport`：`serverchan3` / `dryRun`（默认 `dryRun`，首次安装不误发）。
-- `serverchan3.uid/sendkey`：仅 `transport=serverchan3` 时必填；`appPackage`/`fallbackUrl` 有默认值。
+- `serverchan3.appPackage/fallbackUrl`：有默认值；`uid` 从 SendKey 解析。
+- SendKey：**不写配置**；在配置卡输入，Host 存 DSH credentials（`dsh-mobile-notify/serverchan3`）。配置卡只回传 `{configured,writable,available}`，不回传值。
+- 图形配置：`/mobile/settings` GET/PUT + `configEditor`；普通字段保存会重启插件。SendKey 写入/清除也走该 API。
 - `serverchan3.tags.*`：`enabled`、`namespace`、`includeNamespace`、`includeKind`、`kindTags`、`extra`；默认 `dsh` + `dsh-<kind>`，只做低基数分组。
 - **TAG 的用法**：官方 API 的 `tags` 是 `|` 分隔的字符串，App 会按消息自动聚合 Tag、允许过滤/阅读偏好，但不能手工改名/删除；所以只用稳定、低基数的分组，不用会话名/原因/sessionId。细节见 [architecture.md](architecture.md) §8.3。
 - `notify.*`：事件开关、`debounceMs`、`graceMs`、`detail`、`inPageCountsAsDelivered`、`webNotification`、`inPage`。
@@ -396,7 +401,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 ## 13. 许可与第三方代码
 
 - 仓库私有自用；没有明确开源计划前不添加 `LICENSE` 声明为某开源许可证，`package.json` 用 `"private": true`。
-- 若复用 `dsh-web-ui-notify`（BSD-3-Clause）的 `notify.ts`/设置行代码：保留原版权头、在文件与 README 标注来源和许可证；修改处注明。
+- 若复用 `dsh-web-ui-notify`（BSD-3-Clause）的 `notify.ts`/配置 UI 代码：保留原版权头、在文件与 README 标注来源和许可证；修改处注明。
 - 社区 `dsh-mobile-notify` 只读参考，不复制代码；如确有复制，逐文件保留 MIT 声明并记录。
 - 图标必须原创或使用允许再分发的素材，并保留归属；不直接拿 DSH/Server酱³ 的商标图标。
 - Server酱³、DSH、Zitadel 的名称/商标只用于事实描述，不暗示官方背书。

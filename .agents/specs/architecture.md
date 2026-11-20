@@ -41,7 +41,7 @@
 | 组件 | 负责 | 不负责 |
 |---|---|---|
 | Host（本仓库） | 事件观察/归一化、pending、presence/ack、回退决策、Server酱³、HTTP 路由、配置/日志 | 不改审批结果、不读工具参数全文、不持设备 token |
-| Client（本仓库） | 全量 pending 观察、页内条、Web Notification、presence/ack、JS 桥、设置行 | 不直接发 Server酱³、不持 SendKey、不做审批动作 |
+| Client（本仓库） | 全量 pending 观察、页内条、Web Notification、presence/ack、JS 桥、插件页 Configuration 配置卡 | 不直接发 Server酱³、不持 SendKey、不做审批动作 |
 | Android Shell（另一仓库） | WebView、bootstrap、Cookie、`scopen` extras、文件/返回/Insets | 不发 HTTP presence/ack、不做 Web 通知、不实现 Host |
 | Server酱³ App | MiPush 收信、展示通知、按 `scopen` 拉起 DSH | 不保证 MIUI 关联启动放行、不是 DSH 的通知图标 |
 | oauth2-proxy/Zitadel | `/mobile/*` 的外部认证、DSH 浏览器 Cookie 的登录流程 | 不参与 presence/ack 语义 |
@@ -298,7 +298,7 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 
 ### 7.1 通用
 
-- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, handler })`。
+- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, handler })`。同一 path 只允许注册一次；`/mobile/settings` 的 GET/PUT 在同一个 handler 内按 method 分派。
 - 响应头：`Cache-Control: no-store`；JSON 接口 `Content-Type: application/json; charset=utf-8`；不设 CORS。
 - 认证（除 bootstrap）：`requestRejection` → `admit`；失败返回 401/403，不读 body 之外的状态。
 - 方法不符：405 + `Allow`。
@@ -398,7 +398,7 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 ### 7.6 `POST /mobile/push/test`
 
 - 认证：同 presence；无请求体或空 JSON 对象 `{}`（有 body 时仍受 §7.1 的大小/类型限制）。
-- 作用：设置行“发送测试推送”；内容通用，不含真实会话/审批。
+- 作用：配置卡“发送测试推送”；内容通用，不含真实会话/审批。
 - 走当前 transport：`dryRun` → 只记录脱敏 payload；`serverchan3` → 真发。
 - 成功：`202 { "ok": true, "dryRun": <boolean> }`；上游失败：`502 { "ok": false, "error": "upstream_failed" }`；限流：429。
 - 不写 pending、不影响回退状态机。
@@ -423,14 +423,21 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 - 不含 SendKey/uid/publicBase、会话标题/原因等敏感配置。
 - `transport` 只报枚举；`lastPush` 可为 null。
 
+### 7.8 `GET|PUT /mobile/settings`（本仓库扩展）
+
+- 认证：同 presence/ack；GET 返回配置卡草稿，PUT 保存。
+- GET：`{ contract, editable, sendkey: { configured, writable, available }, settings }`；`settings` 只含非敏感字段；`sendkey` 只有状态，不含值。
+- PUT body：`{ settings, sendkey? }`。`settings` 为完整 DTO；`sendkey` 省略=保持不变、`null`=清除、字符串=写入 credentials 前先校验 `sctp...` 格式。
+- 保存顺序：先校验 settings（复用 `resolveConfig`）和 SendKey，再写 credentials，最后 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`；普通字段保存会重启插件。
+- 若 `configEditor`/`fiber.entry` 不存在：GET 仍可读，`editable=false`；PUT 返回 503。credentials 不可用：`sendkey.available=false`，带 key 的写入返回 503。
+- 不暴露 SendKey/uid/profile 路径；错误文案不包含 secret。body ≤16KB，写入限流 20/min/IP。
+
 ## 8. Server酱³ 适配器
 
 ### 8.1 配置
 
 ```ts
 interface ServerChan3Config {
-  uid?: string           // 数字；缺省时从 sendkey 解析
-  sendkey: string        // sctp...；只在 Host
   appPackage: string     // top.allenyou.dsh
   fallbackUrl: string    // 默认 publicBase
   tags: TagConfig
@@ -452,10 +459,10 @@ interface TagConfig {
 }
 ```
 
-- 校验：`sendkey` 匹配 `^sctp\d+t[A-Za-z0-9_-]+$`（只允许 URL 安全字符；以实际 SendKey 为准，若官方格式含其它字符，调整正则并补测试）；`uid` 数字；两者解析结果不一致 → 配置错误（不静默用错）。
+- 凭据不在 Config：SendKey 由 Host 通过 `ctx.get('credentials')` 的 `dsh-mobile-notify/serverchan3` grant record 读取，每次发送前解析 uid；格式校验 `^sctp\d+t[A-Za-z0-9_-]+$`（以实际 SendKey 为准，若官方格式含其它字符，调整正则并补测试）。
 - 端点：`POST https://${uid}.push.ft07.com/send/${sendkey}.send`；不拼接 query，不记录完整 URL。
-- `transport=dryRun` 时不要求凭据；`transport=serverchan3` 缺凭据 → 插件加载失败。
-- 不把 SendKey 放进 `/mobile/config`、health、日志、通知或异常消息。
+- `transport=dryRun` 不读凭据；`transport=serverchan3` 允许无凭据加载（便于先打开配置页），发送时返回 `serverchan3 credentials missing`；不静默降级到 dryRun。
+- 不把 SendKey 放进 Config、`/mobile/config`、`/mobile/settings`、health、日志、通知或异常消息。
 - `tags` 只影响 Server酱³ 请求；`dryRun` 仍构建并记录，便于验证；其它未来 transport 不使用。
 - Tag 的官方语义、默认策略、校验和 App 侧用法见 §8.3。
 
@@ -492,7 +499,7 @@ interface TagConfig {
 | `question` | `dsh-question` | 需要回答；建议作为高优先级过滤入口 |
 | `plan-review` | `dsh-plan-review` | 计划确认 |
 | `turn` | `dsh-turn` | 可选的完成提醒；可过滤/调整阅读偏好 |
-| `test` | `dsh-test` | 设置行测试推送，便于识别和清理 |
+| `test` | `dsh-test` | 配置卡测试推送，便于识别和清理 |
 
 - 顺序固定：namespace → kind → extra；精确去重（保留首次出现），便于测试和阅读。
 - 默认 payload 的 `tags`：
@@ -570,8 +577,6 @@ interface Config {
   publicBase: string
   transport: 'dryRun' | 'serverchan3'
   serverchan3?: {
-    uid?: string
-    sendkey?: string
     appPackage: string
     fallbackUrl?: string
     tags: {
@@ -621,10 +626,9 @@ interface Config {
 
 | 字段 | 默认 | 约束 |
 |---|---|---|
-| `publicBase` | 无（必填） | http/https URL；无 query/hash；规范化尾斜杠；生产必须 https |
-| `transport` | `dryRun` | 枚举；`serverchan3` 时凭据必填 |
-| `serverchan3.uid` | 由 sendkey 解析 | 数字；与 sendkey 不一致则报错 |
-| `serverchan3.sendkey` | 无（serverchan3 时必填） | `sctp...`；仅 URL 安全字符 |
+| `publicBase` | bundle patch 默认 `https://dsh.allenyou.top/`；schema 必填 | http/https URL；无 query/hash；规范化尾斜杠；生产必须 https |
+| `transport` | `dryRun` | 枚举；`serverchan3` 允许先无凭据启动，发送时要求 credentials |
+| SendKey | 无 | 只在 credentials；配置卡写入/清除；不落 Config |
 | `serverchan3.appPackage` | `top.allenyou.dsh` | 包名正则 |
 | `serverchan3.fallbackUrl` | `publicBase` | http/https URL |
 | `serverchan3.tags.enabled` | `true` | boolean；false 时不发 `tags` |
@@ -660,8 +664,8 @@ interface Config {
         publicBase: 'https://dsh.allenyou.top/'
         transport: 'serverchan3'          # 首次联调先用 dryRun
         serverchan3:
-          uid: '123'
-          sendkey: 'sctp123tREDACTED'    # 不提交真实值
+          # SendKey 不写在这里；在 Plugins → 移动通知 → Configuration 输入，
+          # 由 Host 存入 DSH credentials（key: dsh-mobile-notify/serverchan3）。
           appPackage: 'top.allenyou.dsh'
           fallbackUrl: 'https://dsh.allenyou.top/'
           tags:
@@ -710,7 +714,7 @@ apply(ctx)
   4. 注入 window.__dshMobile（尽早；Shell 的 scopen 可能已在排队）
   5. 异步拉 /mobile/config（失败用默认）
   6. 订阅 ctx.uiSession.sessionStatus
-  7. 注册 shell.bottom 页内条 + settings.general.item 设置行
+  7. 注册 shell.bottom 页内条 + plugins.bundle.config 配置卡（key=dsh-mobile-notify）
   8. 发送首个 presence；启动可见时的 10s 心跳
 ```
 
@@ -797,16 +801,16 @@ interface DshMobileBridge {
 - 清理：仅当 `window.__dshMobile` 仍是本插件注入的对象时删除；不覆盖其他全局。
 - `window.__DSH_SHELL__` 只读；读取 `{ version, contract }` 用于诊断，不修改。
 
-### 10.8 设置行
+### 10.8 插件页 Configuration 配置卡
 
-- 槽：`settings.general.item`，id `dsh-mobile-notify`，locale NS，order 建议 30（与旧插件相近）。
-- 内容：
-  - 浏览器通知权限状态（granted/denied/default/unsupported）；
-  - “请求通知权限”按钮（用户手势调用 `Notification.requestPermission()`）；
-  - “发送测试推送”按钮 → POST `/mobile/push/test`，展示成功/失败/限流；
-  - 可选：当前平台（web/android-shell）、contract 版本、插件版本。
-- 不做持久化开关；所有通知/隐私开关在 Host 配置里（避免客户端与 Host 配置不一致）。
-- 槽不存在时跳过注册，仅告警。
+- 位置：**Plugins → 移动通知 → Configuration**，与 `dsh-context` 等第三方插件相同；不是全局 Settings 页面。
+- 注册：`ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({ name: 'plugins.bundle.config', key: NS, locale: NS }, ConfigCard))`；`key` 用包/entry id `dsh-mobile-notify`，plugin manager 的 config ledger 据此显示 Configuration。
+- `dsh-context` 使用 `ctx.configForms.whileServed([ns], ...)`，因为它的 Config 字段是 `.volatile()`、由 settings 服务在线编辑；本插件普通字段经 `configEditor` 落盘并重启插件，SendKey 在 credentials，所以直接注册卡片，数据走 `/mobile/settings`。
+- 内容：publicBase、transport、appPackage/fallback、SendKey（写后只显示状态）、TAG、提醒开关、detail、隐私、limits、测试推送和浏览器通知权限。
+- 保存：PUT `/mobile/settings`；普通配置由 Host 的 configEditor 写入 profile patch。保存会重启插件，卡片显示“保存请求已发出，正在确认…”并重新读取；不重复提交。
+- 不在 Client 持久化配置；不把 SendKey 放 React 之外的状态/日志；保存成功后清空输入并只显示“已配置”。
+- `plugins.bundle.config` 不存在或注册失败：记录 warning，其它功能继续；Host `/mobile/settings` 仍是配置入口（可被未来 UI 复用）。
+- 权限/测试走 `/mobile/push/test` 与 `Notification.requestPermission()`；不执行审批/回答。
 
 ### 10.9 生命周期与 HMR
 
@@ -822,6 +826,8 @@ interface DshMobileBridge {
 | 包名 | 逻辑名 `dsh-mobile` | 实际包/行 id `dsh-mobile-notify` | 不影响协议；Shell 不依赖包名 |
 | `transport` | 只有 `serverchan3` | 增加 `dryRun`（默认，仅记录不发网络） | 便于首次安装/联调；生产切回 `serverchan3` |
 | `GET /mobile/config` | 无 | 新增客户端只读配置 | additive；旧 Shell 不调用 |
+| `GET/PUT /mobile/settings` | 无 | 插件页图形配置；SendKey 写 credentials | additive；仅浏览器配置卡使用 |
+| 配置卡位置 | 无 | Plugins → 包 → Configuration | DSH 插件页扩展；不改变 Shell 协议 |
 | ack `callId` | 无 | 可选字段 | additive；旧 Host 可忽略；本 Host 优先用于关联 |
 | health 认证 | “loopback 或 DSH Cookie” | 一律 DSH Cookie + Origin | 更严格；不影响 Shell |
 | `/mobile/pending` | 可选 | v1 不实现 | 契约允许不提供 |

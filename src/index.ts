@@ -1,9 +1,11 @@
 /** dsh-mobile-notify Host entry: wire events, presence, Server酱³, and routes. */
 import { Config, resolveConfig, type Config as PluginConfig } from './config.ts'
 import { systemClock } from './host/clock.ts'
+import { credentialsOf, readSendkey } from './host/credentials.ts'
 import { DecisionEngine } from './host/decision.ts'
 import { registerEventObservers, type EventContext } from './host/events.ts'
 import { PresenceStore } from './host/presence.ts'
+import { SettingsService, configEditorOf } from './host/settings.ts'
 import { registerRoutes, type RouteConnection, type RouteWebServer } from './host/routes.ts'
 import { ServerChanTransport } from './host/serverchan3.ts'
 import type { LastPush, Logger } from './host/types.ts'
@@ -18,6 +20,7 @@ export interface HostContext extends EventContext {
   connection: RouteConnection
   logger: Logger
   effect: (callback: () => (() => void) | void, label?: string) => void
+  fiber?: { entry?: unknown }
 }
 
 /** Mount the Host half; invalid config fails the plugin load with an actionable error. */
@@ -31,7 +34,20 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
   )
 
   const presence = new PresenceStore(clock)
-  const transport = new ServerChanTransport({ config, logger: ctx.logger, clock })
+  const credentials = credentialsOf(ctx)
+  const settings = new SettingsService({
+    config,
+    credentials,
+    configEditor: configEditorOf(ctx),
+    entry: ctx.fiber?.entry,
+    logger: ctx.logger,
+  })
+  const transport = new ServerChanTransport({
+    config,
+    logger: ctx.logger,
+    clock,
+    sendkey: () => readSendkey(credentials),
+  })
   const engine = new DecisionEngine({
     config,
     clock,
@@ -60,6 +76,7 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
         clock,
         version: '0.1.0',
         health,
+        settings,
         sendTest: signal => transport.sendTest(signal),
       },
     ),

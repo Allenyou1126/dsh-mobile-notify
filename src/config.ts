@@ -39,8 +39,6 @@ export interface LimitsConfig {
 }
 
 export interface ServerChan3Input {
-  uid?: string
-  sendkey?: string
   appPackage?: string
   fallbackUrl?: string
   tags?: Partial<TagConfig>
@@ -57,8 +55,6 @@ export interface Config {
 }
 
 export interface EffectiveServerChan3Config {
-  uid?: string
-  sendkey?: string
   appPackage: string
   fallbackUrl: string
   tags: TagConfig
@@ -74,8 +70,6 @@ export interface EffectiveConfig {
 }
 
 const SCOPE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/u
-const SENDKEY_PATTERN = /^sctp\d+t[A-Za-z0-9_-]+$/u
-const UID_PATTERN = /^\d+$/u
 
 const tagsSchema = Schema.object({
   enabled: Schema.boolean().default(true),
@@ -93,8 +87,6 @@ const tagsSchema = Schema.object({
 }).default({})
 
 const serverChan3Schema = Schema.object({
-  uid: Schema.string(),
-  sendkey: Schema.string(),
   appPackage: Schema.string().default('top.allenyou.dsh'),
   fallbackUrl: Schema.string(),
   tags: tagsSchema,
@@ -198,33 +190,11 @@ function normalizeBase(value: unknown, label: string): string {
   return url.toString()
 }
 
-function parseUid(sendkey: string): string | undefined {
-  return /^sctp(\d+)t/u.exec(sendkey)?.[1]
-}
-
 function normalizeServerChan3(
   input: ServerChan3Input | undefined,
   publicBase: string,
-  transport: TransportKind,
 ): EffectiveServerChan3Config {
   const source = input ?? {}
-  const sendkey = optionalString(source.sendkey)
-  if (sendkey !== undefined && !SENDKEY_PATTERN.test(sendkey)) {
-    throw new ConfigError('serverchan3.sendkey must look like sctp<uid>t<token> and only use URL-safe characters')
-  }
-  const derivedUid = sendkey === undefined ? undefined : parseUid(sendkey)
-  const explicitUid = optionalString(source.uid)
-  if (explicitUid !== undefined && !UID_PATTERN.test(explicitUid)) {
-    throw new ConfigError('serverchan3.uid must be a numeric string')
-  }
-  if (explicitUid !== undefined && derivedUid !== undefined && explicitUid !== derivedUid) {
-    throw new ConfigError('serverchan3.uid does not match the uid embedded in serverchan3.sendkey')
-  }
-  const uid = explicitUid ?? derivedUid
-  if (transport === 'serverchan3' && (sendkey === undefined || uid === undefined)) {
-    throw new ConfigError('transport=serverchan3 requires serverchan3.sendkey (and a derivable uid)')
-  }
-
   const appPackage = optionalString(source.appPackage) ?? 'top.allenyou.dsh'
   if (!SCOPE_KEY_PATTERN.test(appPackage)) {
     throw new ConfigError('serverchan3.appPackage must be a dotted package name')
@@ -233,7 +203,7 @@ function normalizeServerChan3(
   const tags = resolveTagConfig(source.tags)
   validateTagConfig(tags)
 
-  return { uid, sendkey, appPackage, fallbackUrl, tags }
+  return { appPackage, fallbackUrl, tags }
 }
 
 /**
@@ -285,7 +255,7 @@ export function resolveConfig(input: Config): EffectiveConfig {
   return {
     publicBase,
     transport,
-    serverchan3: normalizeServerChan3(input.serverchan3, publicBase, transport),
+    serverchan3: normalizeServerChan3(input.serverchan3, publicBase),
     notify,
     privacy,
     limits,

@@ -10,7 +10,7 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 - 在网页内用**页内提示 + 浏览器系统通知**优先提醒；
 - 用 presence/ack 判断“Web 是否真的提醒到人”，只在 **Web 未成功提醒且手机 App 不在前台**时，调用 **Server酱³ App** 推送；
 - 推送正文带 `scopen://top.allenyou.dsh?...`，由 Android 薄壳接收并回到对应会话；Server酱³ 消息带低基数 TAG（`dsh` / `dsh-<kind>`），便于 App 内过滤；
-- 提供 `window.__dshMobile.openSession/setForeground` JS 桥、设置行、测试推送和健康检查。
+- 提供 `window.__dshMobile.openSession/setForeground` JS 桥、插件页 Configuration 配置卡、测试推送和健康检查。
 
 ## 本仓库不是什么
 
@@ -58,9 +58,9 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 
 ## 状态
 
-- 2026-11-20：规格定稿；**M1 Host 核心 + M2 Client 基础已实现**，`npm run check`（typecheck + node:test + build）通过。
-- 已构建 `lib/index.js` / `lib/client.js`；**尚未安装到目标 profile，未做真实 DSH/浏览器/HyperOS 联调**。
-- 本目录的“验收”仍是目标，不是已通过的结果；M2.5/M3 真机项按 [goals.md](goals.md) §7 逐条验证。
+- 2026-11-21：M1/M2/M2.5 已实现并安装到目标 profile；69 项单测与构建通过。配置卡位于 **Plugins → 移动通知 → Configuration**，普通配置经 `configEditor`、SendKey 经 `credentials` 保存；隔离 profile 中已验证图形保存、写入/清除 SendKey 且响应不含 key。
+- 已从目标 profile 移除 `dsh-web-ui-notify`。主实例需重启一次以清理旧路由；重启后配置卡可用。
+- 本目录的“验收”仍是目标，不是已通过的结果；M3 真机（Server酱³/MiPush/`scopen`）按 [goals.md](goals.md) §7 逐条验证。
 - 不要把“代码能构建”当成功能完成；Server酱³/MiPush/`scopen` 必须真机验证。
 
 ## 目录规则

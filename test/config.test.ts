@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Config, resolveConfig } from '../src/config.ts'
+import { isSendkey } from '../src/shared/serverchan.ts'
 import { ConfigError } from '../src/shared/errors.ts'
 
 test('minimal config fills defaults and normalizes the base URL', () => {
@@ -15,29 +16,21 @@ test('minimal config fills defaults and normalizes the base URL', () => {
   assert.deepEqual(config.serverchan3.tags.extra, [])
 })
 
-test('serverchan3 requires a sendkey but derives uid when possible', () => {
+test('serverchan3 config leaves credentials to the credentials service', () => {
   const config = resolveConfig({
     publicBase: 'https://dsh.example/',
     transport: 'serverchan3',
-    serverchan3: { sendkey: 'sctp42tTOKEN' },
+    serverchan3: { appPackage: 'top.allenyou.dsh' },
   })
-  assert.equal(config.serverchan3.uid, '42')
-  assert.equal(config.serverchan3.sendkey, 'sctp42tTOKEN')
+  assert.equal(config.transport, 'serverchan3')
+  assert.equal(config.serverchan3.appPackage, 'top.allenyou.dsh')
+  assert.equal('sendkey' in config.serverchan3, false)
 })
 
-test('serverchan3 rejects missing credentials and mismatched uid', () => {
-  assert.throws(
-    () => resolveConfig({ publicBase: 'https://dsh.example/', transport: 'serverchan3' }),
-    ConfigError,
-  )
-  assert.throws(
-    () => resolveConfig({
-      publicBase: 'https://dsh.example/',
-      transport: 'serverchan3',
-      serverchan3: { uid: '7', sendkey: 'sctp42tTOKEN' },
-    }),
-    ConfigError,
-  )
+test('SendKey syntax is validated separately from config', () => {
+  assert.equal(isSendkey('sctp42tTOKEN'), true)
+  assert.equal(isSendkey('SCT42TOKEN'), false)
+  assert.equal(isSendkey('sctp42tTOKEN with space'), false)
 })
 
 test('URL and limit validation fails loudly', () => {

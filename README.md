@@ -10,11 +10,12 @@ DeepSeek Harness 的 Web 通知插件（Host + Client bundle）：页面/桌面�
 
 ## 状态
 
-M1 Host 核心 + M2 Client 基础已实现：
+M1 Host + M2 Client + M2.5 安装/图形配置已实现：
 
 - Host：配置/TAG、审批/提问/turn 事件观察、去抖、presence/ack 状态机、HTTP 路由、Server酱³ 适配器、dryRun、测试推送、health。
-- Client：`sessionStatus` pending 观察、`shell.bottom` 页内条、Web Notification、presence/ack、设置行、`window.__dshMobile` 桥。
-- 构建与 `node:test` 单测通过；**尚未安装到 profile、未做真机/HyperOS 验证**。
+- Client：`sessionStatus` pending 观察、`shell.bottom` 页内条、Web Notification、presence/ack、插件页 Configuration 配置卡、`window.__dshMobile` 桥。
+- 配置卡位于 **Plugins → 移动通知 → Configuration**，保存非敏感配置走 DSH `configEditor`，SendKey 存在 DSH `credentials`，不出现在配置或客户端响应里。
+- 构建、`node:test` 与隔离 profile 的图形保存/清除 SendKey 已验证；**主实例需重启一次以加载新 Host 代码**。真机/HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。
 - `turnDone` 目前只有 Host 推送回退；Client 不额外生成完成提醒（默认关闭）。
 
 ## 构建与测试
@@ -35,18 +36,14 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 # 重启 DSH Web，刷新页面
 ```
 
-最小配置：
+bundle 自带 `publicBase: https://dsh.allenyou.top/` 的部署默认值，安装后即可打开配置页；在 **Plugins → 移动通知 → Configuration** 修改：
 
-```yaml
-- insert:
-    - id: dsh-mobile-notify
-      name: 'dsh-mobile-notify'
-      config:
-        publicBase: 'https://dsh.allenyou.top/'
-        transport: 'dryRun'          # 联调通过后改 serverchan3
-```
+- DSH 外部地址、`dryRun`/Server酱³、Android 包名、fallback URL；
+- Server酱³ SendKey（写入后只显示“已配置”，可清除；不落配置、不回传客户端）；
+- TAG 分组、提醒开关、内容详细度、隐私开关和限额；
+- “发送测试推送”，以及浏览器通知权限。
 
-完整配置与 TAG/Server酱³ 说明见 [.agents/specs/architecture.md](.agents/specs/architecture.md) §8–§9。必须先停用 `dsh-web-ui-notify`，并确保 `/mobile/*` 经现有 oauth2-proxy、DSH 只绑 loopback。
+保存普通配置会按 DSH 规则重启插件；配置卡会显示“保存请求已发出，正在确认…”，随后重新读取。完整字段与 TAG/Server酱³ 说明见 [.agents/specs/architecture.md](.agents/specs/architecture.md) §8–§10。必须先移除/停用 `dsh-web-ui-notify`，并确保 `/mobile/*` 经现有 oauth2-proxy、DSH 只绑 loopback。
 
 ## 边界
 

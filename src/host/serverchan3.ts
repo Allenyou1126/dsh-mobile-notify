@@ -3,6 +3,7 @@ import type { DetailLevel, EffectiveConfig } from '../config.ts'
 import { sleep, type Clock } from './clock.ts'
 import { RateLimiter } from './rate-limit.ts'
 import { buildTags } from '../shared/tags.ts'
+import { isSendkey, uidFromSendkey } from '../shared/serverchan.ts'
 import { cleanText, escapeMarkdown, shortId, truncate } from '../shared/text.ts'
 import type { Logger, NormalizedEvent, PushResult, Transport } from './types.ts'
 
@@ -27,6 +28,8 @@ export interface ServerChanTransportDeps {
   readonly config: EffectiveConfig
   readonly logger: Logger
   readonly clock: Clock
+  /** Resolve the stored SendKey per send so rotation works without a restart. */
+  readonly sendkey: () => Promise<string | undefined>
   readonly fetchImpl?: FetchLike
   readonly limiter?: RateLimiter
 }
@@ -182,9 +185,13 @@ export class ServerChanTransport implements Transport {
       return { ok: true, dryRun: true }
     }
 
-    const { uid, sendkey } = config.serverchan3
-    if (uid === undefined || sendkey === undefined) {
+    const sendkey = await this.deps.sendkey()
+    if (!isSendkey(sendkey)) {
       return { ok: false, dryRun: false, error: 'serverchan3 credentials missing' }
+    }
+    const uid = uidFromSendkey(sendkey)
+    if (uid === undefined) {
+      return { ok: false, dryRun: false, error: 'serverchan3 uid missing from SendKey' }
     }
     if (!this.limiter.take('push', config.limits.pushPerMinute, 60_000)) {
       this.deps.logger.warn('dsh-mobile-notify: outbound push rate limit reached')

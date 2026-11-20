@@ -2,7 +2,7 @@
  * presence/ack reporting, and the `window.__dshMobile` shell bridge. */
 import { createElement, type ComponentType } from 'react'
 import { Banner } from './Banner.tsx'
-import { SettingsRow, type TestResult } from './SettingsRow.tsx'
+import { ConfigCard } from './ConfigCard.tsx'
 import { buildAckPayload, type AckPayload } from './ack.ts'
 import {
   decideDelivery,
@@ -12,6 +12,7 @@ import {
 } from './delivery.ts'
 import { dictionaries, NS, type Translate } from './locale.ts'
 import { parseClientConfig } from './config.ts'
+import { postJson, requestJson } from './http.ts'
 import {
   buildPresencePayload,
   environmentWithShell,
@@ -28,6 +29,7 @@ import type {
   PendingItem,
   SessionStatus,
   ShellInfo,
+  TestResult,
 } from './types.ts'
 import { DEFAULT_CLIENT_CONFIG } from './types.ts'
 import { cleanText, shortId } from '../shared/text.ts'
@@ -130,29 +132,6 @@ function normalizePending(
     ...(cleanText(wait.reason, 200) === undefined ? {} : { reason: cleanText(wait.reason, 200) }),
     ...(cleanText(firstQuestion, 200) === undefined ? {} : { question: cleanText(firstQuestion, 200) }),
   }
-}
-
-async function requestJson(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  ;(timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
-  try {
-    return await fetch(path, {
-      ...init,
-      credentials: 'same-origin',
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function postJson(path: string, body: unknown, timeoutMs: number): Promise<Response> {
-  return requestJson(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  }, timeoutMs)
 }
 
 /** Mount the Client half. */
@@ -545,30 +524,29 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'dsh-mobile-notify: banner slot')
 
-    const SettingsView = (() => createElement(SettingsRow, {
+    const ConfigCardView = (() => createElement(ConfigCard, {
       t,
-      platform,
       sendTest,
     })) as ComponentType<never>
 
     ctx.effect(() => {
       let dispose: (() => void) | undefined
-      ctx.slots.inject('settings.general.item', () => {
+      ctx.slots.inject('plugins.bundle.config', () => {
         dispose?.()
         try {
           dispose = ctx.slots.register(
-            { name: 'settings.general.item', id: NS, order: 30, locale: NS },
-            SettingsView,
+            { name: 'plugins.bundle.config', key: NS, locale: NS },
+            ConfigCardView,
           )
         } catch (error) {
-          console.warn('dsh-mobile-notify: settings row registration failed', error)
+          console.warn('dsh-mobile-notify: plugin config card registration failed', error)
         }
       })
       return () => {
         dispose?.()
         dispose = undefined
       }
-    }, 'dsh-mobile-notify: settings slot')
+    }, 'dsh-mobile-notify: plugin config card')
   }
 
   installBridge()

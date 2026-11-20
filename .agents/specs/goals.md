@@ -1,6 +1,6 @@
 # 实施目标与验收
 
-> 状态：**规格定稿（2026-11-20）**，代码尚未开始。
+> 状态：**规格定稿（2026-11-20）**；M1 Host 核心 + M2 Client 基础已实现，`npm run check` 通过；未安装、未真机联调。
 > 依据：[DECISION.md](../../../DECISION.md)（最终决议）、[PLAN.md](../../../PLAN.md)（背景）、[plugin-contract.md](../../../dsh-android-shell/.agents/specs/plugin-contract.md)（v1 接口）。
 > 本文只回答“本仓库要交付什么、不交付什么、怎么算完成”；实现细节见 [architecture.md](architecture.md)，技术选型见 [tech-stack.md](tech-stack.md)。
 
@@ -41,7 +41,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 
   ```text
   debounce 内 resolved            → 不通知
-  phoneForeground() 且 inPage     → 不推手机（页内提示已可见）
+  phoneForeground() + inPage + inPageCountsAsDelivered → 不推手机
   无新鲜 web presence             → 推 Server酱³
   有 web presence                 → 等 graceMs(4000) 的 ack
        任一 ack.delivered=true    → 不推
@@ -160,7 +160,7 @@ dsh-mobile-notify/
 
 ### 4.2 文档
 
-- 根 `README.md`：一句话定位 + 指向 `.agents/specs`；安装/配置最小示例在实现阶段补全。
+- 根 `README.md`：定位 + 构建/安装/最小配置 + 指向 `.agents/specs`。
 - `docs/DETAIL.md`：功能、限制、隐私档位、故障排查（Plugin Manager 详情页用）。
 - `.agents/specs/*`：本目录；不随实现漂移。
 
@@ -202,6 +202,8 @@ dsh-mobile-notify/
 | **M4 硬化与发布** | 隐私档位回归、错误处理、R8/签名不在本仓库、README/DETAIL、版本与安装说明 | 连续日常使用 3 天；无长连接/常驻；可重复安装；文档可排障 | 2–3 天 |
 
 **总预算**：本仓库约 2 周（不含 Shell 仓库的 M3 工作），与 DECISION“总计 2–3 周”一致。不要为了提前演示跳过 M1 的决策状态机测试；它是唯一容易悄悄错的逻辑。
+
+**实现状态（2026-11-20）**：M1/M2 代码已落地，含 Host 路由/事件/决策/Server酱³ 与 Client 页内条/通知/presence/ack/桥；本地单测与构建通过。M2.5 安装替换、M3 真机验证、M4 连续使用仍未执行。
 
 ## 7. 验收清单
 

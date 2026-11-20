@@ -1,6 +1,6 @@
 # 技术选型
 
-> 状态：**已定（2026-11-20）**。本文的选择是实现依据；与 [DECISION.md](../../../DECISION.md) 冲突时以 DECISION 为准，与本目录其它文档冲突时以本文为准并回头修正。
+> 状态：**已定（2026-11-20）**；M1/M2 基础已按本选型实现，待安装/真机联调。本文的选择是实现依据；与 [DECISION.md](../../../DECISION.md) 冲突时以 DECISION 为准，与本目录其它文档冲突时以本文为准并回头修正。
 > 目标 DSH：`0.2.2-rc.5`；Node：`>=24.9.0`；包名/Client bundle id：`dsh-mobile-notify`。
 
 ## 1. 结论表
@@ -82,7 +82,9 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-session",
         "@deepseek-ai/dsh-client-ui-settings",
@@ -233,6 +235,8 @@ await build({
 - 不用 `tsup`/`vite`/`webpack`；这个插件只有两个入口。
 
 ### 5.3 类型来源
+
+> **实现修订（2026-11-20）**：v1 代码在 DSH 边界使用窄结构接口（Host `HostContext` / Client `ClientContext`），不 import 完整 DSH 类型包；只保留 `@deepseek-ai/schemastery` 与 React 类型为开发依赖。这样构建/测试不依赖 pnpm 类型农场，但**升级 DSH 时必须按本节核对文档/源码并补回归**。下面的完整 DSH 类型包方案保留给后续需要更严格契约检查时使用。
 
 - 类型检查针对**本机安装的 DSH `0.2.2-rc.5`**，不针对记忆或旧版本。
 - 首选：`devDependencies` 精确锁 `0.2.2-rc.5` 的 DSH 类型包（`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-user-approval`、`@deepseek-ai/dsh-user-questions`、`@deepseek-ai/dsh-client-ui-session`、`@deepseek-ai/dsh-client-ui-slots`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-workspace` 等，具体以实际包名为准）。

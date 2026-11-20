@@ -1,0 +1,58 @@
+{
+  "name": "dsh-mobile-notify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web-first notifications for DeepSeek Harness approvals/questions, with Server酱³ App fallback and scopen deep links.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "locale",
+    "docs",
+    "icon.svg",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": "0.2.2-rc.5"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@types/node": "^22.19.0",
+    "@types/react": "~18.3.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

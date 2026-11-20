@@ -19,3 +19,6 @@ Thumbs.db
 .idea/
 *.iml
 .vscode/
+
+# Local development scratch (npm cache, temp installs)
+.tmp/

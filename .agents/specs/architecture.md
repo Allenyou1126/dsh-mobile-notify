@@ -1,6 +1,6 @@
 # 架构、协议与状态机
 
-> 状态：规格定稿（2026-11-20），尚未实现。
+> 状态：规格定稿（2026-11-20）；M1 Host 核心 + M2 Client 基础已实现，待安装与真机联调。
 > 接口基线：[plugin-contract.md](../../../dsh-android-shell/.agents/specs/plugin-contract.md) v1；产品取舍：[DECISION.md](../../../DECISION.md)；目标 DSH `0.2.2-rc.5`。
 > 本文里的“契约”指 Shell ↔ 本插件的 v1 契约；本文新增的兼容性扩展集中在 §11。
 
@@ -239,8 +239,8 @@ interface AckRecord {
 | ack true 在 debounce 前到达 | 存起来；evaluate 时直接抑制 |
 | 全部 ack false 在 grace 内到达 | 立即推（不必等满 4s） |
 | 部分客户端不 ack | 到 `graceMs` 超时推 |
-| 手机在 grace 内回到前台，且 `inPage=true` | presence 更新触发取消尚未发出的推送 |
-| 手机在前台但 `inPage=false` | 不提前抑制、不取消；页内条不存在，应按 ack/超时推 |
+| 手机在 grace 内回到前台，且 `inPage=true`、`inPageCountsAsDelivered=true` | presence 更新触发取消尚未发出的推送 |
+| 手机在前台但 `inPage=false` 或严格模式 | 不提前抑制、不取消；页内条不存在/不算 delivered，应按 ack/超时推 |
 | 页面在 ack 前关闭 | 无 ack；grace 超时推（若手机不在前台） |
 | resolved 与推送同时 | 以状态机先到者为准；resolved 后 abort 未发出的请求；已发出的不撤回 |
 | 新 web 客户端在 grace 中出现 | 不计入 `expectedWebClientIds`；若它 ack true 仍可抑制；否则超时推 |
@@ -255,15 +255,15 @@ onEvent(event):
   record = create(event)                         # debouncing
   schedule(debounceMs):
     if record.state != debouncing: return
-    if config.notify.inPage and phoneForeground():
-      record.state = suppressed; return           # 页内已可见，不推手机
+    if config.notify.inPage and config.notify.inPageCountsAsDelivered and phoneForeground():
+      record.state = suppressed; return           # 页内提示确实是 delivered，不推手机
     if liveWebClients().isEmpty():
       push(record); return                        # 没有页面可提醒
     record.expectedWebClientIds = liveWebClients().ids
     record.state = waiting-ack
     schedule(graceMs):
       if record.state != waiting-ack: return
-      if config.notify.inPage and phoneForeground(): record.state = suppressed; return
+      if config.notify.inPage and config.notify.inPageCountsAsDelivered and phoneForeground(): record.state = suppressed; return
       if anyAckDelivered(record): record.state = suppressed; return
       push(record)
     # ack 到达时（debounce 后、grace 内）：
@@ -284,7 +284,8 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 
 补充规则：
 
-- 手机在 evaluate 时就在前台且 `notify.inPage=true`：直接 suppressed，不进入 grace；之后手机退到后台也不补推（用户已看到页内提示）。这是 v1 的明确取舍。
+- 手机在 evaluate 时就在前台且 `notify.inPage=true` 且 `inPageCountsAsDelivered=true`：直接 suppressed，不进入 grace；之后手机退到后台也不补推（用户已看到页内提示）。这是 v1 的明确取舍。
+- `inPageCountsAsDelivered=false`（严格模式）时，页内条不视为 delivered；即使手机前台，也不做提前抑制，走 ack/grace，Client 在 WebView 无系统通知时会 ack false，Host 再推 Server酱³。
 - `notify.inPage=false` 时不做“手机前台”提前抑制：此时页内条不存在，手机前台也无法通过页内条提醒，应继续走 ack/grace；手机没有可用的系统通知时 ack false，Host 会推 Server酱³。
 - `graceMs=0` 仅用于测试/调试；等价于立即超时推。
 - `debounceMs=0` 也允许（测试），但生产默认 1500。
@@ -824,10 +825,10 @@ interface DshMobileBridge {
 | ack `callId` | 无 | 可选字段 | additive；旧 Host 可忽略；本 Host 优先用于关联 |
 | health 认证 | “loopback 或 DSH Cookie” | 一律 DSH Cookie + Origin | 更严格；不影响 Shell |
 | `/mobile/pending` | 可选 | v1 不实现 | 契约允许不提供 |
-| turn-done ack | `kind=turn` 已列出，但流程未细化 | 同一 presence/ack 状态机；默认关闭 | additive/可选 |
+| turn-done ack | `kind=turn` 已列出，但流程未细化 | Host 已实现 turn 推送；Client 暂不生成完成提醒/ack，走 Host 回退；默认关闭 | additive/可选 |
 | `scopen` 的 `kind` | 示例只写 approval/question | 允许 `plan-review`/`turn`；Shell 只读白名单 key | 不影响拉起；`kind` 仅信息 |
 | `sc.confirm` | 默认 1 | 不主动设置 | 保持默认；白名单后可免确认 |
-| `phoneForeground` 提前抑制 | DECISION 表述为“手机前台即不推” | 仅在 `notify.inPage=true` 时提前抑制；`inPage=false` 走 ack/grace | 更符合“页内提示已可见”的前提；默认配置下行为一致 |
+| `phoneForeground` 提前抑制 | DECISION 表述为“手机前台即不推” | 仅在 `notify.inPage=true` 且 `inPageCountsAsDelivered=true` 时提前抑制；否则走 ack/grace | 更符合“页内提示已可见/已算 delivered”的前提；默认配置下行为一致 |
 
 如果要把这些扩展写回契约：在 `dsh-android-shell` 仓库更新 `plugin-contract.md`，兼容性字段不升 `contract` 版本；破坏性变更才升版本。本仓库不在未沟通的情况下改 Shell 契约。
 

@@ -1,0 +1,635 @@
+/** dsh-mobile-notify Client entry: pending watch, in-page banner, Web Notifications,
+ * presence/ack reporting, and the `window.__dshMobile` shell bridge. */
+import { createElement, type ComponentType } from 'react'
+import { Banner } from './Banner.tsx'
+import { SettingsRow, type TestResult } from './SettingsRow.tsx'
+import { buildAckPayload, type AckPayload } from './ack.ts'
+import {
+  decideDelivery,
+  kindTitle,
+  notificationTitle,
+  summarizePending,
+} from './delivery.ts'
+import { dictionaries, NS, type Translate } from './locale.ts'
+import { parseClientConfig } from './config.ts'
+import {
+  buildPresencePayload,
+  environmentWithShell,
+  readEnvironment,
+  type PresenceEnvironment,
+} from './presence.ts'
+import { BannerStore, type BannerItem } from './store.ts'
+import type {
+  ClientConfig,
+  ClientContext,
+  ClientPlatform,
+  DshMobileBridge,
+  PendingInteraction,
+  PendingItem,
+  SessionStatus,
+  ShellInfo,
+} from './types.ts'
+import { DEFAULT_CLIENT_CONFIG } from './types.ts'
+import { cleanText, shortId } from '../shared/text.ts'
+
+export const name = 'dsh-mobile-notify'
+export const inject = ['sessions', 'slots', 'locale', 'uiSession', 'uiWorkspace']
+
+const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
+const CLIENT_ID_STORAGE = 'dsh-mobile-notify:clientId'
+const HEARTBEAT_MS = 10_000
+const SESSION_RETRY_MS = 300
+const SESSION_RETRY_LIMIT = 17
+
+type TrackedMode = 'pending' | 'in-page' | 'web-notification' | 'failed'
+
+interface Tracked {
+  item: PendingItem
+  notified: boolean
+  acked: boolean
+  mode: TrackedMode
+  settleTimer?: ReturnType<typeof setTimeout>
+  notification?: Notification
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function bindTranslate(ctx: ClientContext): Translate {
+  const bound = ctx.locale.bind(NS)
+  return (key, params) => bound(key, params)
+}
+
+function makeClientId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  } catch {
+    // Fall through to the timestamp id.
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getClientId(): string {
+  try {
+    const existing = window.sessionStorage.getItem(CLIENT_ID_STORAGE)
+    if (existing !== null && existing !== '') return existing
+    const id = makeClientId()
+    window.sessionStorage.setItem(CLIENT_ID_STORAGE, id)
+    return id
+  } catch {
+    return makeClientId()
+  }
+}
+
+function detectPlatform(): ClientPlatform {
+  if (typeof window === 'undefined') return 'web'
+  if (window.__DSH_SHELL__ !== undefined) return 'android-shell'
+  try {
+    return /DSHAndroidShell\//u.test(navigator.userAgent) ? 'android-shell' : 'web'
+  } catch {
+    return 'web'
+  }
+}
+
+function shellInfo(): ShellInfo | undefined {
+  return typeof window === 'undefined' ? undefined : window.__DSH_SHELL__
+}
+
+function sessionLabel(ctx: ClientContext, sessionId: string): string {
+  const label = ctx.sessions.list.getSnapshot().byId[sessionId]?.displayTitle
+  return cleanText(label, 40) ?? shortId(sessionId)
+}
+
+function normalizeKind(raw: string): PendingItem['kind'] | undefined {
+  if (raw === 'approval') return 'approval'
+  if (raw === 'question') return 'question'
+  if (raw === 'plan-review') return 'plan-review'
+  if (raw === 'turn') return 'turn'
+  return undefined
+}
+
+function normalizePending(
+  ctx: ClientContext,
+  sessionId: string,
+  wait: PendingInteraction,
+): PendingItem | undefined {
+  const kind = normalizeKind(wait.kind)
+  if (kind === undefined) return undefined
+  if (typeof wait.key !== 'string' || wait.key === '') return undefined
+  const firstQuestion = wait.questions?.[0]?.question
+  return {
+    key: `${sessionId}:${wait.key}`,
+    sessionId,
+    kind,
+    rawKind: wait.kind,
+    waitKey: wait.key,
+    label: sessionLabel(ctx, sessionId),
+    ...(typeof wait.callId === 'string' && wait.callId !== '' ? { callId: wait.callId } : {}),
+    ...(cleanText(wait.toolName, 60) === undefined ? {} : { toolName: cleanText(wait.toolName, 60) }),
+    ...(cleanText(wait.reason, 200) === undefined ? {} : { reason: cleanText(wait.reason, 200) }),
+    ...(cleanText(firstQuestion, 200) === undefined ? {} : { question: cleanText(firstQuestion, 200) }),
+  }
+}
+
+async function requestJson(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  ;(timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
+  try {
+    return await fetch(path, {
+      ...init,
+      credentials: 'same-origin',
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function postJson(path: string, body: unknown, timeoutMs: number): Promise<Response> {
+  return requestJson(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }, timeoutMs)
+}
+
+/** Mount the Client half. */
+export function apply(ctx: ClientContext): void {
+  const t = bindTranslate(ctx)
+  ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-mobile-notify: locale')
+
+  const clientId = getClientId()
+  const platform = detectPlatform()
+  const shell = shellInfo()
+  const bannerStore = new BannerStore()
+  const tracked = new Map<string, Tracked>()
+  const retryTimers = new Set<ReturnType<typeof setInterval>>()
+  const opening = new Set<string>()
+  let config: ClientConfig = DEFAULT_CLIENT_CONFIG
+  let active = true
+  let bannerAvailable = false
+  let shellForeground: boolean | undefined
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  let presenceInflight = false
+  let presenceDirty = false
+  let presenceErrorLogged = false
+  let unsubscribeStatus: (() => void) | undefined
+  let bridgeInstalled = false
+  let bridgeObject: DshMobileBridge | undefined
+  let previousBridge: DshMobileBridge | undefined
+
+  if (shell?.contract !== undefined && shell.contract > 1) {
+    // Forward-compatible: the v1 fields we use are still additive.
+    console.debug(`dsh-mobile-notify: shell contract ${shell.contract} > 1; using v1 behavior`)
+  }
+
+  function currentEnvironment(): PresenceEnvironment {
+    return environmentWithShell(readEnvironment(), shellForeground)
+  }
+
+  function startHeartbeat(): void {
+    if (heartbeat !== undefined) return
+    heartbeat = setInterval(() => sendPresence(), HEARTBEAT_MS)
+    ;(heartbeat as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.()
+  }
+
+  function stopHeartbeat(): void {
+    if (heartbeat === undefined) return
+    clearInterval(heartbeat)
+    heartbeat = undefined
+  }
+
+  function failPendingInPage(): void {
+    for (const record of tracked.values()) {
+      if (record.mode === 'in-page' && !record.acked) {
+        ack(record, false, 'none', 'hidden-no-notification')
+      }
+    }
+  }
+
+  function syncPresence(): void {
+    if (!active) return
+    sendPresence()
+    if (currentEnvironment().visibility === 'visible') startHeartbeat()
+    else {
+      stopHeartbeat()
+      failPendingInPage()
+    }
+  }
+
+  function sendPresence(): void {
+    if (!active) return
+    if (presenceInflight) {
+      presenceDirty = true
+      return
+    }
+    presenceInflight = true
+    void (async () => {
+      try {
+        do {
+          presenceDirty = false
+          const body = buildPresencePayload(clientId, platform, currentEnvironment())
+          try {
+            const response = await postJson('/mobile/presence', body, 3000)
+            if (!response.ok) throw new Error(`HTTP ${response.status}`)
+            presenceErrorLogged = false
+          } catch (error) {
+            if (!presenceErrorLogged) {
+              presenceErrorLogged = true
+              console.debug('dsh-mobile-notify: presence post failed', error)
+            }
+          }
+        } while (presenceDirty && active)
+      } finally {
+        presenceInflight = false
+      }
+    })()
+  }
+
+  function pageHide(): void {
+    if (!active) return
+    failPendingInPage()
+    stopHeartbeat()
+    try {
+      const body = buildPresencePayload(clientId, platform, {
+        visibility: 'hidden',
+        focused: false,
+        notification: readEnvironment().notification,
+      })
+      void fetch('/mobile/presence', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: true,
+        credentials: 'same-origin',
+      }).catch(() => {})
+    } catch {
+      // pagehide is best effort; Host TTL covers it.
+    }
+  }
+
+  function onVisibility(): void {
+    syncPresence()
+    if (currentEnvironment().visibility === 'visible') scan()
+  }
+
+  function onFocus(): void {
+    sendPresence()
+  }
+
+  function onBlur(): void {
+    sendPresence()
+  }
+
+  function postAck(payload: AckPayload): void {
+    void (async () => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await postJson('/mobile/ack', payload, 3000)
+          if (response.ok) return
+        } catch {
+          // Retry once; the Host grace window is the deadline.
+        }
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 300))
+      }
+      console.debug('dsh-mobile-notify: ack post failed')
+    })()
+  }
+
+  function ack(
+    record: Tracked,
+    delivered: boolean,
+    via: 'in-page' | 'web-notification' | 'none',
+    reason: 'none' | 'permission-denied' | 'unsupported' | 'constructor-error' | 'hidden-no-notification',
+  ): void {
+    if (record.acked) return
+    record.acked = true
+    const payload = buildAckPayload(record.item, clientId, platform, delivered, via, reason)
+    postAck(payload)
+    updateBanner()
+  }
+
+  function showNotification(record: Tracked): boolean {
+    if (typeof Notification === 'undefined') {
+      ack(record, false, 'none', 'unsupported')
+      return false
+    }
+    try {
+      const notification = new Notification(notificationTitle(record.item, t, config), {
+        body: summarizePending(record.item, config, t),
+        tag: record.item.key,
+      })
+      notification.onclick = () => {
+        try {
+          window.focus()
+        } catch {
+          // Focus can be blocked; navigation still proceeds.
+        }
+        void openSession(record.item.sessionId)
+        notification.close()
+      }
+      record.notification = notification
+      return true
+    } catch {
+      ack(record, false, 'none', 'constructor-error')
+      return false
+    }
+  }
+
+  function settle(record: Tracked): void {
+    record.settleTimer = undefined
+    if (!active || tracked.get(record.item.key) !== record) return
+    const environment = currentEnvironment()
+    const decision = decideDelivery({
+      visible: environment.visibility === 'visible',
+      focused: environment.focused,
+      bannerAvailable,
+      notification: environment.notification,
+    }, config)
+    record.notified = true
+    record.mode = decision.mode
+    if (decision.mode === 'in-page') {
+      // The banner's mount effect sends the in-page ack; no notification is built.
+      updateBanner()
+      return
+    }
+    if (decision.mode === 'web-notification') {
+      if (showNotification(record)) {
+        ack(record, true, 'web-notification', 'none')
+      }
+      updateBanner()
+      return
+    }
+    ack(record, false, 'none', decision.reason)
+    updateBanner()
+  }
+
+  function updateBanner(): void {
+    if (!config.inPage) {
+      bannerStore.setItems([])
+      return
+    }
+    const items: BannerItem[] = []
+    for (const record of tracked.values()) {
+      if (!record.notified) continue
+      const generic = config.detail === 'generic'
+      items.push({
+        key: record.item.key,
+        sessionId: record.item.sessionId,
+        label: generic || !config.includeSessionTitle ? '' : record.item.label,
+        kindTitle: generic ? t('banner.generic') : kindTitle(record.item.kind, t),
+        summary: generic ? '' : summarizePending(record.item, config, t),
+        needsAck: record.mode === 'in-page' && !record.acked,
+      })
+    }
+    bannerStore.setItems(items)
+  }
+
+  function onShown(key: string): void {
+    const record = tracked.get(key)
+    if (record === undefined || record.acked || record.mode !== 'in-page') return
+    ack(record, true, 'in-page', 'none')
+    bannerStore.markAcked(key)
+  }
+
+  function removeTracked(key: string): void {
+    const record = tracked.get(key)
+    if (record === undefined) return
+    if (record.settleTimer !== undefined) {
+      clearTimeout(record.settleTimer)
+      record.settleTimer = undefined
+    }
+    record.notification?.close()
+    record.notification = undefined
+    tracked.delete(key)
+  }
+
+  function scan(): void {
+    if (!active) return
+    try {
+      const status: ReadonlyMap<string, SessionStatus> = ctx.uiSession.sessionStatus.getSnapshot()
+      const seen = new Set<string>()
+      for (const [sessionId, row] of status) {
+        const wait = row.pendingInteraction
+        if (wait === undefined) continue
+        const item = normalizePending(ctx, sessionId, wait)
+        if (item === undefined) continue
+        seen.add(item.key)
+        if (tracked.has(item.key)) continue
+        const record: Tracked = {
+          item,
+          notified: false,
+          acked: false,
+          mode: 'pending',
+        }
+        tracked.set(item.key, record)
+        record.settleTimer = setTimeout(() => settle(record), config.settleMs)
+      }
+      for (const key of [...tracked.keys()]) {
+        if (!seen.has(key)) removeTracked(key)
+      }
+      updateBanner()
+    } catch (error) {
+      console.debug('dsh-mobile-notify: sessionStatus scan failed', error)
+    }
+  }
+
+  function tryOpen(sessionId: string): boolean {
+    try {
+      if (ctx.sessions.list.getSnapshot().byId[sessionId] === undefined) return false
+      ctx.uiWorkspace.openSession(sessionId)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function openSession(sessionId: string): boolean {
+    if (!SESSION_ID_PATTERN.test(sessionId)) return false
+    if (tryOpen(sessionId)) return true
+    if (opening.has(sessionId)) return true
+    opening.add(sessionId)
+    let elapsed = 0
+    const timer = setInterval(() => {
+      if (!active) {
+        clearInterval(timer)
+        retryTimers.delete(timer)
+        opening.delete(sessionId)
+        return
+      }
+      elapsed += SESSION_RETRY_MS
+      if (tryOpen(sessionId)) {
+        clearInterval(timer)
+        retryTimers.delete(timer)
+        opening.delete(sessionId)
+        return
+      }
+      if (elapsed >= SESSION_RETRY_MS * SESSION_RETRY_LIMIT) {
+        clearInterval(timer)
+        retryTimers.delete(timer)
+        opening.delete(sessionId)
+        bannerStore.showNotice(t('banner.unavailable'))
+      }
+    }, SESSION_RETRY_MS)
+    retryTimers.add(timer)
+    ;(timer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.()
+    return true
+  }
+
+  function sendTest(): Promise<TestResult> {
+    return (async () => {
+      try {
+        const response = await requestJson('/mobile/push/test', { method: 'POST' }, 10_000)
+        if (response.status !== 202) return 'failed'
+        const value: unknown = await response.json().catch(() => undefined)
+        return isRecord(value) && value.dryRun === true ? 'dryRun' : 'ok'
+      } catch {
+        return 'failed'
+      }
+    })()
+  }
+
+  function installBridge(): void {
+    if (typeof window === 'undefined') return
+    const existing = window.__dshMobile
+    const marked = existing as (DshMobileBridge & { __dshMobileNotify?: true }) | undefined
+    if (existing !== undefined && marked?.__dshMobileNotify !== true) {
+      console.warn('dsh-mobile-notify: window.__dshMobile already exists; leaving it untouched')
+      return
+    }
+    // A marked bridge is a previous generation of this plugin (HMR); replace it
+    // instead of restoring the stale object on cleanup.
+    previousBridge = marked?.__dshMobileNotify === true ? undefined : existing
+    bridgeObject = {
+      openSession,
+      setForeground: (foreground: boolean) => {
+        shellForeground = foreground
+        syncPresence()
+        if (foreground) scan()
+      },
+    }
+    ;(bridgeObject as DshMobileBridge & { __dshMobileNotify?: true }).__dshMobileNotify = true
+    window.__dshMobile = bridgeObject
+    bridgeInstalled = true
+  }
+
+  function registerSlots(): void {
+    const BannerView = (() => createElement(Banner, {
+      store: bannerStore,
+      t,
+      onShown,
+      onOpen: (sessionId: string) => { void openSession(sessionId) },
+    })) as ComponentType<never>
+
+    ctx.effect(() => {
+      let dispose: (() => void) | undefined
+      ctx.slots.inject('shell.bottom', () => {
+        dispose?.()
+        try {
+          dispose = ctx.slots.register(
+            { name: 'shell.bottom', id: NS, order: 40, locale: NS },
+            BannerView,
+          )
+          bannerAvailable = true
+          scan()
+        } catch (error) {
+          console.warn('dsh-mobile-notify: shell.bottom registration failed', error)
+        }
+      })
+      return () => {
+        dispose?.()
+        dispose = undefined
+        bannerAvailable = false
+      }
+    }, 'dsh-mobile-notify: banner slot')
+
+    const SettingsView = (() => createElement(SettingsRow, {
+      t,
+      platform,
+      sendTest,
+    })) as ComponentType<never>
+
+    ctx.effect(() => {
+      let dispose: (() => void) | undefined
+      ctx.slots.inject('settings.general.item', () => {
+        dispose?.()
+        try {
+          dispose = ctx.slots.register(
+            { name: 'settings.general.item', id: NS, order: 30, locale: NS },
+            SettingsView,
+          )
+        } catch (error) {
+          console.warn('dsh-mobile-notify: settings row registration failed', error)
+        }
+      })
+      return () => {
+        dispose?.()
+        dispose = undefined
+      }
+    }, 'dsh-mobile-notify: settings slot')
+  }
+
+  installBridge()
+  registerSlots()
+
+  unsubscribeStatus = ctx.uiSession.sessionStatus.subscribe(() => scan())
+  scan()
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibility)
+    document.addEventListener('pagehide', pageHide)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+  }
+  syncPresence()
+
+  void (async () => {
+    try {
+      const response = await requestJson('/mobile/config', { headers: { accept: 'application/json' } }, 3000)
+      if (!response.ok) return
+      const parsed = parseClientConfig(await response.json())
+      if (parsed !== undefined && active) {
+        config = parsed
+        updateBanner()
+      }
+    } catch (error) {
+      console.debug('dsh-mobile-notify: client config fetch failed; using defaults', error)
+    }
+  })()
+
+  ctx.effect(() => () => {
+    active = false
+    stopHeartbeat()
+    unsubscribeStatus?.()
+    unsubscribeStatus = undefined
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onVisibility)
+      document.removeEventListener('pagehide', pageHide)
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+    for (const timer of retryTimers) clearInterval(timer)
+    retryTimers.clear()
+    opening.clear()
+    for (const record of tracked.values()) {
+      if (record.settleTimer !== undefined) clearTimeout(record.settleTimer)
+      record.notification?.close()
+    }
+    tracked.clear()
+    bannerStore.dispose()
+    if (bridgeInstalled && bridgeObject !== undefined && typeof window !== 'undefined') {
+      if (window.__dshMobile === bridgeObject) {
+        if (previousBridge === undefined) delete window.__dshMobile
+        else window.__dshMobile = previousBridge
+      }
+    }
+    bridgeInstalled = false
+    bridgeObject = undefined
+  }, 'dsh-mobile-notify: client lifecycle')
+}

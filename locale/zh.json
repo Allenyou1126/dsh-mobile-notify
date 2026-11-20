@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "移动通知",
+    "description": "审批/提问的 Web 优先提醒；Web 未送达且手机不在前台时回退 Server酱³，并带 scopen 深链。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,10 @@
+# dsh-mobile-notify bundle patch: mount the Host half.
+#
+# The browser half is discovered through package.json's `dsh.client` and
+# exports["./client"]. The Host half owns routes, events, presence/ack, and the
+# Server酱³ fallback. `publicBase` is intentionally not baked in here; provide
+# it (and transport credentials) in the profile's cordis.patch.yml.
+
+- insert:
+    - id: dsh-mobile-notify
+      name: 'dsh-mobile-notify'

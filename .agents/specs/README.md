@@ -58,9 +58,10 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 
 ## 状态
 
-- 2026-11-20：规格定稿；**没有代码、没有构建产物、没有安装到 profile**。
-- 本目录的“验收”是目标，不是已通过的结果；真机验证属于后续里程碑。
-- 不要把“文档写完”当成功能完成；实现完成后需按 [goals.md](goals.md) §7 逐条验证。
+- 2026-11-20：规格定稿；**M1 Host 核心 + M2 Client 基础已实现**，`npm run check`（typecheck + node:test + build）通过。
+- 已构建 `lib/index.js` / `lib/client.js`；**尚未安装到目标 profile，未做真实 DSH/浏览器/HyperOS 联调**。
+- 本目录的“验收”仍是目标，不是已通过的结果；M2.5/M3 真机项按 [goals.md](goals.md) §7 逐条验证。
+- 不要把“代码能构建”当成功能完成；Server酱³/MiPush/`scopen` 必须真机验证。
 
 ## 目录规则
 

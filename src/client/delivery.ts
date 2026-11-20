@@ -14,6 +14,8 @@ export interface DeliveryDecision {
   via: 'in-page' | 'web-notification' | 'none'
   reason: AckReason
   needsInPageAck: boolean
+  /** The open Session surface already shows this request; do not render the floating card. */
+  suppressCard?: boolean
 }
 
 export interface DeliveryInput {
@@ -22,6 +24,8 @@ export interface DeliveryInput {
   /** Whether the shell.overlay slot is registered and can actually render. */
   bannerAvailable: boolean
   notification: NotificationState
+  /** The event belongs to the Session currently open in the main view. */
+  viewingSession?: boolean
 }
 
 /** Decide how this page can remind the user, before trying to construct a Notification. */
@@ -33,6 +37,17 @@ export function decideDelivery(input: DeliveryInput, config: ClientConfig): Deli
     && input.focused
     && input.bannerAvailable
   ) {
+    if (input.viewingSession === true) {
+      // The user is already looking at this Session; DSH's own pending UI is
+      // the in-page delivery, so skip the redundant floating card and ack it.
+      return {
+        mode: 'in-page',
+        via: 'in-page',
+        reason: 'none',
+        needsInPageAck: false,
+        suppressCard: true,
+      }
+    }
     return { mode: 'in-page', via: 'in-page', reason: 'none', needsInPageAck: true }
   }
   if (config.webNotification && input.notification === 'granted') {

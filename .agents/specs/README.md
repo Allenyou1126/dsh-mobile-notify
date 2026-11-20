@@ -58,8 +58,8 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 
 ## 状态
 
-- 2026-11-21：M1/M2/M2.5 已实现并安装到目标 profile；69 项单测与构建通过。配置卡位于 **Plugins → 移动通知 → Configuration**，普通配置经 `configEditor`、SendKey 经 `credentials` 保存；隔离 profile 中已验证图形保存、写入/清除 SendKey 且响应不含 key。
-- 已从目标 profile 移除 `dsh-web-ui-notify`。主实例需重启一次以清理旧路由；重启后配置卡可用。
+- 2026-11-21：M1/M2/M2.5 已实现并安装到目标 profile；71 项单测与构建通过。配置卡位于 **Plugins → 移动通知 → Configuration**，普通配置经 `configEditor`、SendKey 经 `credentials` 保存；隔离 profile 中已验证图形保存、写入/清除 SendKey 且响应不含 key。
+- 已从目标 profile 移除 `dsh-web-ui-notify`；主实例已重启，配置卡与浮动提醒卡可用。
 - 本目录的“验收”仍是目标，不是已通过的结果；M3 真机（Server酱³/MiPush/`scopen`）按 [goals.md](goals.md) §7 逐条验证。
 - 不要把“代码能构建”当成功能完成；Server酱³/MiPush/`scopen` 必须真机验证。
 

@@ -42,6 +42,46 @@ test('decideDelivery prefers a mounted in-page banner when visible and focused',
   })
 })
 
+test('decideDelivery suppresses the card for the Session already open in the main view', () => {
+  const decision = decideDelivery({
+    visible: true,
+    focused: true,
+    bannerAvailable: true,
+    notification: 'granted',
+    viewingSession: true,
+  }, config())
+  assert.deepEqual(decision, {
+    mode: 'in-page',
+    via: 'in-page',
+    reason: 'none',
+    needsInPageAck: false,
+    suppressCard: true,
+  })
+})
+
+test('open Session suppression requires the normal in-page delivery conditions', () => {
+  assert.equal(
+    decideDelivery({
+      visible: false,
+      focused: false,
+      bannerAvailable: true,
+      notification: 'granted',
+      viewingSession: true,
+    }, config()).mode,
+    'web-notification',
+  )
+  assert.equal(
+    decideDelivery({
+      visible: true,
+      focused: true,
+      bannerAvailable: true,
+      notification: 'granted',
+      viewingSession: true,
+    }, config({ inPageCountsAsDelivered: false })).mode,
+    'web-notification',
+  )
+})
+
 test('decideDelivery falls back to a system notification when hidden', () => {
   const decision = decideDelivery({
     visible: false,

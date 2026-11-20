@@ -62,7 +62,7 @@
 | `shellTtlMs` | 15000ms（android-shell 前台判定） |
 | `heartbeatMs` | 10000ms（页面可见时的 presence 心跳） |
 | `bodyBytes` | 2048（presence/ack 请求体上限） |
-| `inPageCountsAsDelivered` | 页面可见+聚焦时，页内条显示即算 delivered；默认 `true` |
+| `inPageCountsAsDelivered` | 页面可见+聚焦时，浮动提醒卡显示即算 delivered；默认 `true` |
 
 时间基准：
 
@@ -240,7 +240,7 @@ interface AckRecord {
 | 全部 ack false 在 grace 内到达 | 立即推（不必等满 4s） |
 | 部分客户端不 ack | 到 `graceMs` 超时推 |
 | 手机在 grace 内回到前台，且 `inPage=true`、`inPageCountsAsDelivered=true` | presence 更新触发取消尚未发出的推送 |
-| 手机在前台但 `inPage=false` 或严格模式 | 不提前抑制、不取消；页内条不存在/不算 delivered，应按 ack/超时推 |
+| 手机在前台但 `inPage=false` 或严格模式 | 不提前抑制、不取消；浮动提醒卡不存在/不算 delivered，应按 ack/超时推 |
 | 页面在 ack 前关闭 | 无 ack；grace 超时推（若手机不在前台） |
 | resolved 与推送同时 | 以状态机先到者为准；resolved 后 abort 未发出的请求；已发出的不撤回 |
 | 新 web 客户端在 grace 中出现 | 不计入 `expectedWebClientIds`；若它 ack true 仍可抑制；否则超时推 |
@@ -275,7 +275,7 @@ onEvent(event):
 
 ```text
 t0        事件到达，开始 debounce
-t0+0.5s   Client 显示页内条 → ack delivered=true（可能早于 debounce）
+t0+0.5s   Client 显示浮动提醒卡 → ack delivered=true（可能早于 debounce）
 t0+1.5s   debounce 结束：看到 ack true → 不推
           或：没有 ack → 开始 grace 4s
 t0+5.5s   grace 超时：手机不在前台 → 推 Server酱³
@@ -285,12 +285,12 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 补充规则：
 
 - 手机在 evaluate 时就在前台且 `notify.inPage=true` 且 `inPageCountsAsDelivered=true`：直接 suppressed，不进入 grace；之后手机退到后台也不补推（用户已看到页内提示）。这是 v1 的明确取舍。
-- `inPageCountsAsDelivered=false`（严格模式）时，页内条不视为 delivered；即使手机前台，也不做提前抑制，走 ack/grace，Client 在 WebView 无系统通知时会 ack false，Host 再推 Server酱³。
-- `notify.inPage=false` 时不做“手机前台”提前抑制：此时页内条不存在，手机前台也无法通过页内条提醒，应继续走 ack/grace；手机没有可用的系统通知时 ack false，Host 会推 Server酱³。
+- `inPageCountsAsDelivered=false`（严格模式）时，浮动提醒卡不视为 delivered；即使手机前台，也不做提前抑制，走 ack/grace，Client 在 WebView 无系统通知时会 ack false，Host 再推 Server酱³。
+- `notify.inPage=false` 时不做“手机前台”提前抑制：此时浮动提醒卡不存在，手机前台也无法通过浮动提醒卡提醒，应继续走 ack/grace；手机没有可用的系统通知时 ack false，Host 会推 Server酱³。
 - `graceMs=0` 仅用于测试/调试；等价于立即超时推。
 - `debounceMs=0` 也允许（测试），但生产默认 1500。
 - 没有 android-shell presence 时 `phoneForeground=false`；没有 web presence 时直接推。
-- `inPageCountsAsDelivered=true` 只在 `notify.inPage=true` 时有意义；`inPage=false` 时 Client 不会用页内条作为 delivered。
+- `inPageCountsAsDelivered=true` 只在 `notify.inPage=true` 时有意义；`inPage=false` 时 Client 不会用浮动提醒卡作为 delivered。
 - 推送是异步单飞；push 失败只记录，不重入状态机、不阻塞审批。
 - `resolved` 在任何状态都清理 timer、删除记录；`pushAbort` 用于中止尚未完成的 HTTP 请求。
 
@@ -729,7 +729,8 @@ apply(ctx)
   - `key = ${sessionId}:${wait.key}`；`kind = wait.kind`；`callId = wait.callId?`。
   - 若 `notified` 已含该 key → 跳过。
   - 启动 `settleMs` timer；期间 pending 消失 → 取消，不展示、不 ack。
-  - timer 到期且仍 pending → 展示页内条/尝试通知 → ack → 标记 `notified`。
+  - timer 到期且仍 pending → 展示浮动卡/尝试通知 → ack → 标记 `notified`。
+  - 当前主视图 Session（`ctx.uiSession.adapter.current.getSnapshot().key`）等于事件 `sessionId`，且页面 visible/focused、会走 in-page 时：**不渲染浮动卡**；直接 ack `delivered=true, via=in-page`，视为 DSH 会话内已提醒，避免回退手机推送。
 - pending 消失时：关闭对应 Notification，删除 `notified` 标记；若用户已在 DSH 回答，Host 也会 resolved。
 - 多标签：每个标签独立观察；`clientId` 不同；任一 delivered true 抑制 Host 推送。
 - 子代理：审批/提问照常展示；turn-done 由 Host 默认关闭，Client 不主动为子代理创建完成提醒。
@@ -737,20 +738,20 @@ apply(ctx)
 ### 10.3 右下角浮动提醒卡（`shell.overlay`）
 
 - 注册：`ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-mobile-notify', locale: NS, order: 40 }, Banner))`。
-- 内容：右下角浮卡（宽 380px、`right/bottom: 20px`、安全区适配）；标题 + 总数；最多 3 条 pending，每行显示类型、会话标题、摘要和“打开会话”；更多显示“还有 N 项”。
+- 内容：右下角浮卡（宽 380px、`right/bottom: 20px`、安全区适配）；标题 + 总数；最多 3 条 pending，每行显示类型、会话标题、摘要和“打开会话”；更多显示“还有 N 项”。当前正在查看的 Session 不进入列表。
 - 高度/布局：绝对定位于 overlay 层，不占 DSH 布局高度；空时返回 `null`。窄屏宽度 `min(380px, 100vw - 32px)`。
 - 样式：内联 `CSSProperties` + DSH 主题变量；圆角浮层、阴影、进入动画；`role="status"`、`aria-live="polite"`；每项是键盘可操作按钮。
 - `notify.inPage=false` 时不渲染；其 ack 走系统通知或 false。
 - `shell.overlay` 是 list 槽；若注册抛错：记录 warning，`bannerAvailable=false`，继续 Web Notification/回退；不抢占、不覆盖其它插件。
 - 点击只导航，不执行审批/回答；打开后由 DSH 自身的卡片处理。
-- 页内条在**真正挂载后**回调 controller；只有该回调成功才 ack `via=in-page`。若组件挂载/槽注册失败，按“页内条未显示”处理，继续尝试系统通知或 ack false。
+- 浮动卡在**真正挂载后**回调 controller；只有该回调成功才 ack `via=in-page`。若组件挂载/槽注册失败，按“浮动卡未显示”处理，继续尝试系统通知或 ack false。
 - 标准 DSH Web 组合提供 `shell.overlay`；若注册失败，`bannerAvailable=false`，Host 的“手机前台提前抑制”不成立，按 ack/grace 处理。不要静默假装已提醒。
 
 ### 10.4 浏览器系统通知
 
 - 条件：`webNotification=true`、`typeof Notification !== 'undefined'`、`Notification.permission === 'granted'`。
 - 展示时机：
-  - 页面 `visible && focused` 且 `inPageCountsAsDelivered=true`：页内条即可，**不弹**系统通知；
+  - 页面 `visible && focused` 且 `inPageCountsAsDelivered=true`：浮动卡即可，**不弹**系统通知；当前 Session 的情况由原生会话 UI 承担；
   - 其他情况（隐藏/未聚焦，或严格模式）：尝试 `new Notification(title, { body, tag })`。
 - 选项：只传 `body`/`tag`；**不设 `requireInteraction`**（KDE/Plasma 会强制常驻，见旧插件的教训）；不设 icon，避免依赖构建资源。
 - `tag`：稳定的 `${sessionId}:${kind}:${wait.key}`；过长时截断/哈希，保证去重。
@@ -760,21 +761,22 @@ apply(ctx)
 
 ### 10.5 ack 判定
 
-| 页面状态 | 页内条 | 系统通知 | delivered / via |
+| 页面状态 | 浮动卡 | 系统通知 | delivered / via |
 |---|---|---|---|
-| visible && focused | 实际挂载后显示 | 不弹（默认） | true / `in-page` |
+| visible && focused，当前视图是其它 Session | 实际挂载后显示 | 不弹（默认） | true / `in-page` |
+| visible && focused，当前视图就是该 Session | 不显示 | 不弹（默认） | true / `in-page`（原生会话 UI 已显示） |
 | visible && focused，`inPage=false` 或严格模式 | 不显示 | 尝试 | 成功 true/`web-notification`；失败 false/`none` |
 | hidden 或未聚焦 | 不显示 | 尝试 | 成功 true/`web-notification`；失败 false/`none` |
 | 任意 | 配置关闭且系统通知关闭/失败 | 不弹 | false / `none` + reason |
 | 页面关闭/JS 挂起 | — | — | 无 ack；Host 超时 |
 
 - ack 立即发；失败可重试一次（500ms 后），仍失败则放弃；Host 超时会补推（宁可多推不漏）。
-- `inPageCountsAsDelivered=false` 时，即使页面可见+聚焦，也要系统通知成功才算 delivered。
+- `inPageCountsAsDelivered=false` 时，即使页面可见+聚焦，也要系统通知成功才算 delivered；当前视图 Session 的跳过逻辑只在正常 in-page 分支生效。
 - ack 的 `contract=1`；`callId` 有则带；`key` 用 `wait.key`；`at` 用客户端时间。
 
 ### 10.6 presence 发送
 
-- 内容：`contract=1`、`clientId`、`platform`、`visibility`、`focused`、`notification`、`at`；`activeSessionId` v1 可省略（避免依赖未验证的 current API）。
+- 内容：`contract=1`、`clientId`、`platform`、`visibility`、`focused`、`notification`、`at`；`activeSessionId` v1 可省略（当前会话只在 Client 本地通过 `uiSession.adapter.current` 判断浮动卡去重，不发给 Host）。
 - 触发：启动、`visibilitychange`、`focus`/`blur`、Shell 的 `setForeground`、可见时每 10s。
 - 页面隐藏：立即发一次，停止心跳；页面恢复可见：立即发一次并恢复心跳。
 - 发送合并：同一时刻最多一个 presence 请求在途；状态变化时标记 dirty，完成后发最新状态，避免慢网堆积。
@@ -793,7 +795,7 @@ interface DshMobileBridge {
 - 校验 `sessionId` 长度/字符集；不合法返回 false，不导航。
 - `openSession`：
   - 会话在 `ctx.sessions.list` 中 → `ctx.uiWorkspace.openSession(sessionId)`，返回 true；
-  - 不在列表 → 接受请求并每 300ms 重试，最多 ~5s（同步 API 立即返回 true，表示“已接受、导航待完成”）；仍找不到 → 页内条显示“会话暂不可用”；不抛异常。
+  - 不在列表 → 接受请求并每 300ms 重试，最多 ~5s（同步 API 立即返回 true，表示“已接受、导航待完成”）；仍找不到 → 浮动提醒卡显示“会话暂不可用”；不抛异常。
   - 非法 `sessionId`/桥不可用 → 返回 false，不导航。
   - 不执行审批/回答；只导航。
 - `setForeground`：幂等；更新本地 `focused` 状态并立即发 presence；不阻塞。
@@ -863,7 +865,7 @@ interface DshMobileBridge {
   - 配置错误：插件加载失败，错误说明缺什么；
   - 请求错误：4xx + 通用错误体；
   - 推送错误：记录 + 返回失败，不影响审批；
-  - 客户端错误：局部降级（无页内条/无通知），不阻塞 DSH UI。
+  - 客户端错误：局部降级（无浮动提醒卡/无通知），不阻塞 DSH UI。
 - 日志中的 Tag 只记录名称/数量（配置值），不记录动态内容；Tag 本身也可能被第三方看到，不能放密钥/内部 URL。
 - 不引入 metrics/tracing 依赖；需要时从日志和 health 读。
 
@@ -905,4 +907,4 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 - 设置页可视化编辑 `detail`/开关（当前用 Host 配置）。
 - 通知内快捷动作（目前明确不做）。
 - 多设备/deviceToken（当前用 DSH Cookie）。
-- 独立 pending 收件箱页面（当前用页内条 + 会话跳转）。
+- 独立 pending 收件箱页面（当前用浮动提醒卡 + 会话跳转）。

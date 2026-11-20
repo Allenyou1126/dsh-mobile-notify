@@ -14,8 +14,9 @@ M1 Host + M2 Client + M2.5 安装/图形配置已实现：
 
 - Host：配置/TAG、审批/提问/turn 事件观察、去抖、presence/ack 状态机、HTTP 路由、Server酱³ 适配器、dryRun、测试推送、health。
 - Client：`sessionStatus` pending 观察、`shell.overlay` 右下角浮动提醒卡、Web Notification、presence/ack、插件页 Configuration 配置卡、`window.__dshMobile` 桥。
+- 当前主视图正在查看的 Session 不弹浮动卡：DSH 会话内已经显示 pending 内容，按“已在会话内提醒”ack，避免重复打扰和回退手机推送。
 - 配置卡位于 **Plugins → 移动通知 → Configuration**，保存非敏感配置走 DSH `configEditor`，SendKey 存在 DSH `credentials`，不出现在配置或客户端响应里。
-- 构建、`node:test` 与隔离 profile 的图形保存/清除 SendKey 已验证；**主实例需重启一次以加载新 Host 代码**。真机/HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。
+- 构建、`node:test` 与隔离 profile 的图形保存/清除 SendKey 已验证；主实例已重启并运行最新代码。真机/HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。
 - `turnDone` 目前只有 Host 推送回退；Client 不额外生成完成提醒（默认关闭）。
 
 ## 构建与测试

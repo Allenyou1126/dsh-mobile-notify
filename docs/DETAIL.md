@@ -2,7 +2,7 @@
 
 审批、提问和（可选）turn-done 的 Web 优先通知插件。
 
-- **Web 优先**：页面可见且聚焦时在右下角弹出浮动提醒卡；页面隐藏/未聚焦时使用浏览器系统通知。
+- **Web 优先**：页面可见且聚焦时在右下角弹出浮动提醒卡；如果当前正在查看的就是触发事件的那个 Session，不弹卡（会话内已显示 pending），按已提醒处理。页面隐藏/未聚焦时使用浏览器系统通知。
 - **手机回退**：只有 Web 未成功提醒、且 Android Shell 不在前台时，才通过 Server酱³ App 推送。
 - **深链**：Server酱³ 消息里的 `scopen://top.allenyou.dsh?...` 可由 Android 薄壳拉起并回到对应会话。
 - **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test`，可在 Server酱³ App 内过滤。

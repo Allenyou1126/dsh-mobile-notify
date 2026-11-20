@@ -127,7 +127,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 | N9 | 通知内批准/拒绝、回复问题、执行命令 | 必须进 App 看上下文 |
 | N10 | 通知里包含代码、完整工具参数、审批全文 | 隐私底线；摘要可降级 |
 | N11 | FastPush 零点击自动拉起 | 会打断当前操作；需要时再评估 |
-| N12 | 把所有会话的 pending 做成独立“收件箱”页面 | v1 用页内条 + 系统通知 + 会话跳转；不做新导航 |
+| N12 | 把所有会话的 pending 做成独立“收件箱”页面 | v1 用浮动提醒卡 + 系统通知 + 会话跳转；不做新导航 |
 | N13 | 多设备配对、设备撤销、推送 token 轮换 | 没有 deviceToken；依赖 DSH 会话 |
 | N14 | 浏览器通知的持久化/历史管理 | 交给操作系统；插件不保存通知内容 |
 | N15 | 公开上架、Play 发布、CI/CD 平台建设 | 自用；v1 只要求本地可构建 |
@@ -145,7 +145,7 @@ dsh-mobile-notify/
     config.ts             # 配置 schema 与派生
     contract.ts           # 协议常量/类型/校验（Host+Client 共用）
     host/                 # 事件、pending、presence、决策、路由、Server酱³
-    client/               # 状态观察、页内条、Web Notification、presence/ack、桥
+    client/               # 状态观察、浮动提醒卡、Web Notification、presence/ack、桥
     shared/               # 只放类型与纯函数
   test/                   # node:test + fake ctx/DOM
   build.mjs               # esbuild：Host ESM + Client CJS（__ModuleLoader__）
@@ -197,14 +197,14 @@ dsh-mobile-notify/
 | 阶段 | 本仓库工作 | 出口标准 | 预估 |
 |---|---|---|---|
 | **M1 Host 核心** | 配置/schema（含 TAG）、事件观察、去抖、pending、presence/ack、决策状态机、路由、Server酱³ 适配器、health/config/test push | `curl`/测试可触发 bootstrap、presence、ack、dryRun 推送；TAG 默认/覆盖/去重正确；错误 Origin/超限被拒；自动审批不产生推送 | 3–5 天 |
-| **M2 Client 与 Web 通知** | `sessionStatus` 观察、页内条、Web Notification、presence/ack、`window.__dshMobile`、插件页配置卡 | 桌面可见/隐藏/权限拒绝三条路径都正确；任一端 delivered 抑制推送；桥可打开会话 | 3–4 天 |
+| **M2 Client 与 Web 通知** | `sessionStatus` 观察、浮动提醒卡、Web Notification、presence/ack、`window.__dshMobile`、插件页配置卡 | 桌面可见/隐藏/权限拒绝三条路径都正确；任一端 delivered 抑制推送；桥可打开会话 | 3–4 天 |
 | **M2.5 安装与替换** | 构建、安装到目标 profile、图形配置 `publicBase`/`transport`/TAG/SendKey、移除 `dsh-web-ui-notify`、测试推送 | profile 只保留一套通知；插件页 Configuration 可保存/清除 SendKey；页面加载无报错；health 正常；Server酱³ App 侧栏出现 `dsh`/`dsh-test` 且可按 Tag 过滤 | 1–2 天 |
 | **M3 联调支持** | 与 [dsh-android-shell](../../../dsh-android-shell) 联合验证：`scopen`、关联启动、前后台 presence、锁屏推送、权限拒绝/恢复 | DECISION §6 的场景在真机通过；未通过项有明确记录 | 3–4 天（联合） |
 | **M4 硬化与发布** | 隐私档位回归、错误处理、R8/签名不在本仓库、README/DETAIL、版本与安装说明 | 连续日常使用 3 天；无长连接/常驻；可重复安装；文档可排障 | 2–3 天 |
 
 **总预算**：本仓库约 2 周（不含 Shell 仓库的 M3 工作），与 DECISION“总计 2–3 周”一致。不要为了提前演示跳过 M1 的决策状态机测试；它是唯一容易悄悄错的逻辑。
 
-**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 页内条/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials 已实现。69 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例需重启一次清理旧路由。M3 真机验证、M4 连续使用仍未执行。
+**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 浮动提醒卡/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials 已实现。71 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例已重启并运行。浮动提醒卡已改为右下角浮层，并支持“当前正在查看的 Session 不弹卡”。M3 真机验证、M4 连续使用仍未执行。
 
 ## 7. 验收清单
 
@@ -214,12 +214,12 @@ dsh-mobile-notify/
 
 | # | 场景 | 期望 |
 |---|---|---|
-| A1 | 桌面页面可见且聚焦，出现审批 | 页内条出现；不推 Server酱³ |
-| A2 | 桌面页面可见且聚焦，页内条被点击 | 打开对应会话；pending 仍由 DSH 自身回答 |
+| A1 | 桌面页面可见且聚焦，出现审批（当前视图不是该 Session） | 浮动卡出现；不推 Server酱³ |
+| A2 | 桌面页面可见且聚焦，浮动提醒卡被点击 | 打开对应会话；pending 仍由 DSH 自身回答 |
 | A3 | 桌面页面隐藏，通知权限已给 | 浏览器系统通知；不推 Server酱³ |
 | A4 | 桌面页面隐藏，通知权限被拒 | ack `delivered=false`；手机不在前台时推 Server酱³ |
 | A5 | 桌面页面关闭后出现审批 | 无 web presence → 手机不在前台则推 Server酱³ |
-| A6 | 手机 App 前台，出现审批 | 页内条；不推 Server酱³ |
+| A6 | 手机 App 前台，出现审批（当前视图不是该 Session） | 浮动卡；不推 Server酱³ |
 | A7 | 手机 App 后台/锁屏，出现审批 | Server酱³ 推送（MiPush 路径）；真机 |
 | A8 | 点 Server酱³ 通知 → 打开 DSH | `scopen` 拉起 App 并进入对应会话；真机 |
 | A9 | App 未装/拉起失败 | `sc.fallback` 打开网页版；真机 |
@@ -232,6 +232,8 @@ dsh-mobile-notify/
 | A16 | 主机重启/插件重载 | 不补推历史；DSH 页面恢复后自行显示 pending |
 | A17 | Server酱³ TAG 配置 | 默认 `dsh` + `dsh-approval` 等；namespace/kindTags/extra 生效；顺序稳定、精确去重；`enabled=false` 时不发 `tags`；test 推送带 `dsh-test` |
 | A18 | 插件页 Configuration | 在 Plugins → 移动通知 → Configuration 可读取/保存 publicBase、transport、TAG、notify/privacy/limits；SendKey 只显示已配置状态，可写入/清除；保存后插件可恢复运行，响应不含 SendKey |
+| A19 | 当前正在查看触发事件的 Session | 页面可见/聚焦时不弹浮动卡；ack `delivered=true, via=in-page`，不推 Server酱³；页面隐藏/失焦仍可按系统通知/回退处理 |
+| A20 | 当前查看同一 Session 但页面隐藏/失焦 | 不弹浮动卡；走浏览器系统通知或回退，不因“当前会话”误抑制 |
 
 ### 7.2 安全与错误
 
@@ -296,7 +298,7 @@ dsh-mobile-notify/
 | 多标签/多端重复 | 重复通知 | 客户端 key 去重 + Host 任一端 delivered 抑制 + 单飞 |
 | 手机前后台判定滞后 | 后台误判前台漏推 | `onPause` 主动上报 + 15s TTL；TTL 过期按后台处理 |
 | DSH 升级改 `uiSession.sessionStatus`/事件 | 插件失效 | `engines.dsh` 锁 `0.2.2-rc.5`；feature detect；降级为 Host-only + 页内提示 |
-| 浏览器通知权限默认拒绝 | Web 通知不弹 | 配置卡引导 + ack false 回退；页内条仍在 |
+| 浏览器通知权限默认拒绝 | Web 通知不弹 | 配置卡引导 + ack false 回退；浮动提醒卡仍在 |
 | 第三方看到审批摘要 | 隐私泄露 | `detail` 降级；不发代码/完整参数；锁屏详情由 Server酱³ 控制 |
 | 摘要含 Markdown 特殊字符 | Server酱³ 排版/链接损坏 | 值去换行/控制字符并截断；链接固定标签、单行、percent-encode |
 | 动态/过多 TAG | App Tag 侧边栏膨胀、泄露会话信息 | 低基数固定 Tag；每类事件一个 Tag；总数 ≤8；禁止动态内容 |

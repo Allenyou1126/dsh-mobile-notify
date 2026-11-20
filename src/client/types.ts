@@ -50,8 +50,16 @@ export interface ClientLocale {
   bind: (namespace: string) => (key: string, params?: Record<string, string>) => string
 }
 
+export interface SessionBindingSnapshot {
+  readonly key?: string
+}
+
 export interface ClientUiSession {
   readonly sessionStatus: Observable<ReadonlyMap<string, SessionStatus>>
+  /** Main-view Session binding; `current.key` is the Session the user is viewing. */
+  readonly adapter?: {
+    readonly current: Observable<SessionBindingSnapshot>
+  }
 }
 
 export interface ClientWorkspace {

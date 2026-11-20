@@ -50,6 +50,8 @@ interface Tracked {
   notified: boolean
   acked: boolean
   mode: TrackedMode
+  /** The open Session surface handled an in-page delivery; omit this record from the card. */
+  suppressCard?: boolean
   settleTimer?: ReturnType<typeof setTimeout>
   notification?: Notification
 }
@@ -317,6 +319,15 @@ export function apply(ctx: ClientContext): void {
     }
   }
 
+  function currentSessionId(): string | undefined {
+    try {
+      const key = ctx.uiSession.adapter?.current.getSnapshot()?.key
+      return typeof key === 'string' && key !== '' ? key : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   function settle(record: Tracked): void {
     record.settleTimer = undefined
     if (!active || tracked.get(record.item.key) !== record) return
@@ -326,11 +337,18 @@ export function apply(ctx: ClientContext): void {
       focused: environment.focused,
       bannerAvailable,
       notification: environment.notification,
+      viewingSession: currentSessionId() === record.item.sessionId,
     }, config)
     record.notified = true
     record.mode = decision.mode
+    record.suppressCard = decision.suppressCard === true
     if (decision.mode === 'in-page') {
-      // The banner's mount effect sends the in-page ack; no notification is built.
+      if (record.suppressCard) {
+        // DSH already shows the request in the open Session; ack delivered and
+        // keep this record out of the floating card.
+        ack(record, true, 'in-page', 'none')
+      }
+      // Otherwise the card's mount effect sends the in-page ack.
       updateBanner()
       return
     }
@@ -353,6 +371,7 @@ export function apply(ctx: ClientContext): void {
     const items: BannerItem[] = []
     for (const record of tracked.values()) {
       if (!record.notified) continue
+      if (record.mode === 'in-page' && record.suppressCard === true) continue
       const generic = config.detail === 'generic'
       items.push({
         key: record.item.key,

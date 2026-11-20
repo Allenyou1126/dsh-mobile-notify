@@ -137,6 +137,7 @@ export function apply(ctx: Context): void { ... }
 ```
 
 - 用 `ctx.slots.inject('shell.overlay', ...)` 注册右下角浮动提醒卡；该槽不存在时只告警，不退回 DOM hack。
+- 通过 `ctx.uiSession.adapter.current.getSnapshot().key` 读取当前主视图 Session；仅当页面可见/聚焦且正常会走 in-page 时，若事件就属于该 Session，则跳过浮动卡并 ack delivered，避免重复提醒和手机回退。
 - 用 `ctx.slots.inject('plugins.bundle.config', ...)` 在 **Plugins → 移动通知 → Configuration** 注册配置卡（`key = dsh-mobile-notify`）；该槽不存在时跳过，数据走 Host `/mobile/settings`。不依赖 `configForms.whileServed`，因为普通字段不是 `.volatile()`；这是与 `dsh-context` 的实现差异。
 - 用 `ctx.locale.register(NS, { zh, en })` 注册运行时文案；`locale/*.json` 供 Plugin Manager 的 `meta.*` 使用。
 - 注入 `window.__dshMobile`；在 `ctx.effect` 的清理里删除本插件设置的同名全局（仅当仍是本次注入的对象）。
@@ -316,7 +317,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 - 本地目录安装时 `lib/` 必须已构建；`.gitignore` 忽略 `lib/`，不要从干净 checkout 直接安装。
 - 目标 profile 中停用/移除 `dsh-web-ui-notify`；两者并存会重复通知。
 - **必须用本地路径安装**；不要按包名从 registry 安装，以免拿到同名社区包 `dsh-mobile-notify`。
-- 先 `transport: dryRun` 验证 presence/ack/页内条，再切 `serverchan3` 做真实推送；发一次测试推送让 `dsh`/`dsh-test` Tag 出现在 App 侧栏，再设置 Tag 过滤/阅读偏好。
+- 先 `transport: dryRun` 验证 presence/ack/浮动提醒卡，再切 `serverchan3` 做真实推送；发一次测试推送让 `dsh`/`dsh-test` Tag 出现在 App 侧栏，再设置 Tag 过滤/阅读偏好。
 - nginx：整个 `/mobile/` 前缀（至少 bootstrap/config/presence/ack/push/test/health）走现有 oauth2-proxy；不需要 SSE 的 `proxy_buffering off`，不新增长连接配置。若现有代理只精确匹配了旧路径，需要补上新增路径。
 - `publicBase` 必须是外部 origin；不要填 `http://127.0.0.1:...`（除非本地开发）。
 - DSH 必须只绑 loopback；`/mobile/bootstrap` 不能直接暴露公网。

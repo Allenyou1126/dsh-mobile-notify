@@ -97,6 +97,7 @@ export interface ClientConfig {
   inPage: boolean
   webNotification: boolean
   inPageCountsAsDelivered: boolean
+  turnDone: boolean
   settleMs: number
   detail: DetailLevel
   includeSessionTitle: boolean
@@ -108,6 +109,7 @@ export const DEFAULT_CLIENT_CONFIG: ClientConfig = {
   inPage: true,
   webNotification: true,
   inPageCountsAsDelivered: true,
+  turnDone: false,
   settleMs: 500,
   detail: 'summary',
   includeSessionTitle: true,

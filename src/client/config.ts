@@ -19,6 +19,7 @@ export function parseClientConfig(value: unknown): ClientConfig | undefined {
       'inPageCountsAsDelivered',
       DEFAULT_CLIENT_CONFIG.inPageCountsAsDelivered,
     ),
+    turnDone: bool('turnDone', DEFAULT_CLIENT_CONFIG.turnDone),
     settleMs: typeof settle === 'number' && Number.isFinite(settle) && settle >= 0 && settle <= 2000
       ? Math.round(settle)
       : DEFAULT_CLIENT_CONFIG.settleMs,

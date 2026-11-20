@@ -151,6 +151,15 @@ export function ConfigCard({ t, sendTest }: ConfigCardProps) {
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (draft === undefined || view?.editable === false || saveState === 'saving') return
+    // Saving is a user gesture: use it to request the browser permission that
+    // turnDone needs before claiming Web Notification delivery.
+    if (
+      draft.notify.turnDone
+      && typeof Notification !== 'undefined'
+      && Notification.permission === 'default'
+    ) {
+      try { setPermission(await Notification.requestPermission()) } catch { /* keep default */ }
+    }
     setSaveState('saving')
     setSaveMessage('')
     const body: { settings: SettingsConfig; sendkey?: string | null } = { settings: draft }
@@ -292,6 +301,9 @@ export function ConfigCard({ t, sendTest }: ConfigCardProps) {
           <label style={check}><input type="checkbox" checked={draft.notify.webNotification} disabled={!editable} onChange={e => notify({ webNotification: e.target.checked })} />{t('config.webNotification')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.inPageCountsAsDelivered} disabled={!editable} onChange={e => notify({ inPageCountsAsDelivered: e.target.checked })} />{t('config.inPageCounts')}</label>
         </div>
+        {draft.notify.turnDone && permission !== 'granted' ? (
+          <div style={muted}>{t('config.turnDonePermissionHint')}</div>
+        ) : null}
         <label style={row}><span style={rowLabel}>{t('config.detail')}</span>
           <select style={input} value={draft.notify.detail} disabled={!editable} onChange={e => notify({ detail: e.target.value as SettingsConfig['notify']['detail'] })}>
             <option value="summary">{t('config.detailSummary')}</option>

@@ -13,6 +13,7 @@ import {
 import { dictionaries, NS, type Translate } from './locale.ts'
 import { parseClientConfig } from './config.ts'
 import { postJson, requestJson } from './http.ts'
+import { TurnTracker } from './turn.ts'
 import {
   buildPresencePayload,
   environmentWithShell,
@@ -146,6 +147,8 @@ export function apply(ctx: ClientContext): void {
   const shell = shellInfo()
   const bannerStore = new BannerStore()
   const tracked = new Map<string, Tracked>()
+  const turns = new TurnTracker()
+  const turnNotifications = new Set<Notification>()
   const retryTimers = new Set<ReturnType<typeof setInterval>>()
   const opening = new Set<string>()
   let config: ClientConfig = DEFAULT_CLIENT_CONFIG
@@ -404,6 +407,51 @@ export function apply(ctx: ClientContext): void {
     tracked.delete(key)
   }
 
+  function notifyTurnDone(sessionId: string): void {
+    if (!active || !config.turnDone || !config.webNotification) return
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    if (ctx.sessions.list.getSnapshot().byId[sessionId]?.origin === 'subagent') return
+    const item: PendingItem = {
+      key: `${sessionId}:turn`,
+      sessionId,
+      kind: 'turn',
+      rawKind: 'turn',
+      waitKey: 'turn',
+      label: sessionLabel(ctx, sessionId),
+    }
+    try {
+      const notification = new Notification(notificationTitle(item, t, config), {
+        body: summarizePending(item, config, t),
+        tag: `dsh-mobile-notify:${sessionId}:turn:${Date.now()}`,
+      })
+      turnNotifications.add(notification)
+      notification.onclose = () => { turnNotifications.delete(notification) }
+      notification.onclick = () => {
+        try {
+          window.focus()
+        } catch {
+          // Focus can be blocked; navigation still proceeds.
+        }
+        void openSession(sessionId)
+        notification.close()
+        turnNotifications.delete(notification)
+      }
+      // A successfully constructed browser Notification is the web delivery.
+      // Only this acknowledgement suppresses the Host's Server酱³ fallback.
+      const ackPayload = buildAckPayload(item, clientId, platform, true, 'web-notification', 'none')
+      postAck(ackPayload)
+      // The Host creates its turn record on turn/end. One delayed repeat covers
+      // the rare case where the status edge reaches the client first.
+      const retry = setTimeout(() => {
+        if (active) postAck(ackPayload)
+      }, 600)
+      ;(retry as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
+    } catch (error) {
+      // No notification means no delivered ack; the Host grace window may fall back.
+      console.debug('dsh-mobile-notify: turnDone notification failed', error)
+    }
+  }
+
   function scan(): void {
     if (!active) return
     try {
@@ -428,6 +476,7 @@ export function apply(ctx: ClientContext): void {
       for (const key of [...tracked.keys()]) {
         if (!seen.has(key)) removeTracked(key)
       }
+      for (const sessionId of turns.update(status)) notifyTurnDone(sessionId)
       updateBanner()
     } catch (error) {
       console.debug('dsh-mobile-notify: sessionStatus scan failed', error)
@@ -619,6 +668,11 @@ export function apply(ctx: ClientContext): void {
       record.notification?.close()
     }
     tracked.clear()
+    turns.clear()
+    for (const notification of turnNotifications) {
+      try { notification.close() } catch { /* already closed */ }
+    }
+    turnNotifications.clear()
     bannerStore.dispose()
     if (bridgeInstalled && bridgeObject !== undefined && typeof window !== 'undefined') {
       if (window.__dshMobile === bridgeObject) {

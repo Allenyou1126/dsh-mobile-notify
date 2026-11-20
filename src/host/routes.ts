@@ -325,6 +325,7 @@ function clientConfig(config: EffectiveConfig): unknown {
       inPage: config.notify.inPage,
       webNotification: config.notify.webNotification,
       inPageCountsAsDelivered: config.notify.inPageCountsAsDelivered,
+      turnDone: config.notify.turnDone,
       settleMs: config.notify.settleMs,
       detail: config.notify.detail,
       includeSessionTitle: config.privacy.includeSessionTitle,

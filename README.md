@@ -17,7 +17,7 @@ M1 Host + M2 Client + M2.5 安装/图形配置已实现：
 - 当前主视图正在查看的 Session 不弹浮动卡：DSH 会话内已经显示 pending 内容，按“已在会话内提醒”ack，避免重复打扰和回退手机推送。
 - 配置卡位于 **Plugins → 移动通知 → Configuration**，保存非敏感配置走 DSH `configEditor`，SendKey 存在 DSH `credentials`，不出现在配置或客户端响应里。
 - 构建、`node:test` 与隔离 profile 的图形保存/清除 SendKey 已验证；主实例已重启并运行最新代码。真机/HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。
-- `turnDone` 默认关闭；开启后若任一 Web 页面 visible（不要求 focused），Host 直接按 Web 已展示处理，不再推 Server酱³；Web 页面不可见（hidden）时才走 Host 回退（不生成浮动卡）。
+- `turnDone` 默认关闭；开启后 Client 观察 Session 的 `running: true → false`，成功发送浏览器 Web Notification 才 ack `delivered=true` 并抑制 Server酱³。浏览器通知未授权或构造失败时不 ack，Host 才会按回退推送；turnDone 不生成浮动卡。
 
 ## 构建与测试
 

@@ -56,19 +56,6 @@ export class PresenceStore {
     return false
   }
 
-  /** True while any web page is open and visible, regardless of window focus. */
-  public webVisible(): boolean {
-    const now = this.clock.now()
-    for (const record of this.records.values()) {
-      if (
-        record.platform === 'web'
-        && record.visibility === 'visible'
-        && this.fresh(record, now)
-      ) return true
-    }
-    return false
-  }
-
   /** Fresh web clients, regardless of visibility, used to decide whether to wait for an ack. */
   public liveWebClientIds(): string[] {
     const now = this.clock.now()

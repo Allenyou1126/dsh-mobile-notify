@@ -145,7 +145,7 @@ resolved（next 返回/抛错/abort）：
 ### 3.4 turn/end（可选）
 
 - 仅 `notify.turnDone=true` 时创建 `kind=turn` 记录；默认 false。
-- turn/end 没有 Client pendingInteraction 可 ack：Host 在 evaluate/grace 时若发现任一 Web 页面 visible（不要求 focused）（`presence.webVisible()`），直接 suppress，视为 Web 已展示；否则（页面 hidden）才按 grace/回退推送。turn 不生成浮动卡。
+- turn/end 没有 Client pendingInteraction 可 ack：Client 用 running `true → false` 边沿检测完成，成功发送浏览器 Web Notification 后 ack `kind=turn, delivered=true, via=web-notification`。Host 只在收到该 ack 时 suppress；未授权/构造失败则不 ack，按 grace/回退推送。turn 不生成浮动卡。
 - `baseKey = sessionId + ':turn'`；同一会话在用户读掉（`completionUnread` 变 false）之前最多一条。
 - 不推送子代理：用会话元数据里的 `origin`/父会话信息判断。取不到可靠判定时，turn-done **保守不推**（审批/提问不受影响）；默认配置本来关闭，漏推只影响“完成提醒”，不影响可回答性。
 - turn 记录的 ack 由 Client 观察 `sessionStatus.completionUnread` 变化上报 `kind=turn`；Host 只需在窗口内等 delivered。若 Client 未实现，回退为“无 web 就推、有 web 超时推”；不会阻塞审批链。
@@ -335,6 +335,7 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
       "inPage": true,
       "webNotification": true,
       "inPageCountsAsDelivered": true,
+      "turnDone": false,
       "settleMs": 500,
       "detail": "summary",
       "includeSessionTitle": true,
@@ -834,7 +835,7 @@ interface DshMobileBridge {
 | ack `callId` | 无 | 可选字段 | additive；旧 Host 可忽略；本 Host 优先用于关联 |
 | health 认证 | “loopback 或 DSH Cookie” | 一律 DSH Cookie + Origin | 更严格；不影响 Shell |
 | `/mobile/pending` | 可选 | v1 不实现 | 契约允许不提供 |
-| turn-done ack | `kind=turn` 已列出，但流程未细化 | Host 已实现 turn 推送；Client 无 pending ack。Host 在 Web visible（不要求 focused）时直接抑制，否则走回退；默认关闭 | additive/可选 |
+| turn-done ack | `kind=turn` 已列出，但流程未细化 | Host 已实现 turn 推送；Client 用 running 边沿触发 Web Notification，成功才 ack 并抑制；失败/未授权走回退；默认关闭 | additive/可选 |
 | `scopen` 的 `kind` | 示例只写 approval/question | 允许 `plan-review`/`turn`；Shell 只读白名单 key | 不影响拉起；`kind` 仅信息 |
 | `sc.confirm` | 默认 1 | 不主动设置 | 保持默认；白名单后可免确认 |
 | `phoneForeground` 提前抑制 | DECISION 表述为“手机前台即不推” | 仅在 `notify.inPage=true` 且 `inPageCountsAsDelivered=true` 时提前抑制；否则走 ack/grace | 更符合“页内提示已可见/已算 delivered”的前提；默认配置下行为一致 |

@@ -178,28 +178,31 @@ test('duplicate events do not create a second push', async () => {
   engine.dispose()
 })
 
-test('a visible web page suppresses one-shot turn delivery', async () => {
+test('turn events wait for a delivered ack and fall back without one', async () => {
   const { clock, presenceStore, engine, transport } = harness({ turnDone: true })
   presenceStore.update(presence({ focused: false }))
   engine.begin(makeEvent({ kind: 'turn', oneShot: true }))
   clock.advance(1500)
   await flush()
   assert.equal(transport.sent.length, 0)
+  clock.advance(4000)
+  await flush()
+  assert.equal(transport.sent.length, 1)
   assert.equal(engine.pendingCount, 0)
   engine.dispose()
 })
 
-test('a web page becoming visible during grace cancels a turn push', async () => {
+test('a delivered turn ack suppresses the Server酱 fallback', async () => {
   const { clock, presenceStore, engine, transport } = harness({ turnDone: true })
-  presenceStore.update(presence({ visibility: 'hidden', focused: false }))
+  presenceStore.update(presence({ focused: false }))
   engine.begin(makeEvent({ kind: 'turn', oneShot: true }))
   clock.advance(1500)
   await flush()
-  assert.equal(transport.sent.length, 0)
-  presenceStore.update(presence())
+  engine.onAck(makeAck({ kind: 'turn', key: 'turn', via: 'web-notification' }))
   clock.advance(4000)
   await flush()
   assert.equal(transport.sent.length, 0)
+  assert.equal(engine.pendingCount, 0)
   engine.dispose()
 })
 

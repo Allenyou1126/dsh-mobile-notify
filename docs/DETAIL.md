@@ -41,7 +41,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 - Server酱³ 的锁屏详情、Tag 过滤和阅读偏好由 App 控制，插件无法替用户设置。
 - 不提供通知内批准/拒绝；必须打开会话。
 - 当前实现默认不做 FCM/Mi Push SDK、轮询、SSE/FGS；本仓库不包含 Android Shell。
-- `turnDone` 默认关闭；它没有 Client pendingInteraction，因此由 Host 判断：任一 Web 页面 visible（不要求 focused）时直接抑制 Server酱³，Web 页面不可见（hidden）时才推送回退。不生成浮动卡。
+- `turnDone` 默认关闭；它没有 Client pendingInteraction，Client 通过 Session 的 `running: true → false` 观察完成并发送浏览器 Web Notification。只有通知构造成功才 ack delivered=true 并抑制 Server酱³；未授权/构造失败时不 ack，Host 才回退。turnDone 不生成浮动卡。
 
 ## 排障
 

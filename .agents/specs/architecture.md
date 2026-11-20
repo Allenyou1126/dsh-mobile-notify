@@ -10,7 +10,7 @@
 ┌────────────────────────── 浏览器 / Android WebView ──────────────────────────┐
 │  dsh-mobile-notify Client（本仓库）                                          │
 │   ├─ uiSession.sessionStatus（所有会话的 pendingInteraction）                 │
-│   ├─ 页内条（shell.bottom） + 浏览器 Notification（页面存活时）               │
+│   ├─ 右下角浮动提醒卡（shell.overlay） + 浏览器 Notification（页面存活时）   │
 │   ├─ presence / ack → POST /mobile/presence, /mobile/ack                     │
 │   ├─ GET /mobile/config（客户端开关）                                        │
 │   └─ window.__dshMobile.openSession/setForeground                            │
@@ -41,7 +41,7 @@
 | 组件 | 负责 | 不负责 |
 |---|---|---|
 | Host（本仓库） | 事件观察/归一化、pending、presence/ack、回退决策、Server酱³、HTTP 路由、配置/日志 | 不改审批结果、不读工具参数全文、不持设备 token |
-| Client（本仓库） | 全量 pending 观察、页内条、Web Notification、presence/ack、JS 桥、插件页 Configuration 配置卡 | 不直接发 Server酱³、不持 SendKey、不做审批动作 |
+| Client（本仓库） | 全量 pending 观察、右下角浮动提醒卡、Web Notification、presence/ack、JS 桥、插件页 Configuration 配置卡 | 不直接发 Server酱³、不持 SendKey、不做审批动作 |
 | Android Shell（另一仓库） | WebView、bootstrap、Cookie、`scopen` extras、文件/返回/Insets | 不发 HTTP presence/ack、不做 Web 通知、不实现 Host |
 | Server酱³ App | MiPush 收信、展示通知、按 `scopen` 拉起 DSH | 不保证 MIUI 关联启动放行、不是 DSH 的通知图标 |
 | oauth2-proxy/Zitadel | `/mobile/*` 的外部认证、DSH 浏览器 Cookie 的登录流程 | 不参与 presence/ack 语义 |
@@ -714,7 +714,7 @@ apply(ctx)
   4. 注入 window.__dshMobile（尽早；Shell 的 scopen 可能已在排队）
   5. 异步拉 /mobile/config（失败用默认）
   6. 订阅 ctx.uiSession.sessionStatus
-  7. 注册 shell.bottom 页内条 + plugins.bundle.config 配置卡（key=dsh-mobile-notify）
+  7. 注册 shell.overlay 右下角浮动提醒卡 + plugins.bundle.config 配置卡（key=dsh-mobile-notify）
   8. 发送首个 presence；启动可见时的 10s 心跳
 ```
 
@@ -734,17 +734,17 @@ apply(ctx)
 - 多标签：每个标签独立观察；`clientId` 不同；任一 delivered true 抑制 Host 推送。
 - 子代理：审批/提问照常展示；turn-done 由 Host 默认关闭，Client 不主动为子代理创建完成提醒。
 
-### 10.3 页内条（`shell.bottom`）
+### 10.3 右下角浮动提醒卡（`shell.overlay`）
 
-- 注册：`ctx.slots.inject('shell.bottom', () => ctx.slots.register({ name: 'shell.bottom', id: 'dsh-mobile-notify', locale: NS, order: 40 }, Banner))`。
-- 内容：最多 3 条 pending 会话；每行显示会话标题 + 事件类型/摘要；点击打开会话；更多显示 `+N`。
-- 高度：仅在有 pending 时渲染；空时返回 `null`，不预留高度。
-- 样式：内联 `CSSProperties` + DSH 主题变量；不硬编码亮/暗色；`role="status"`、`aria-live="polite"`；按钮可键盘操作。
+- 注册：`ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-mobile-notify', locale: NS, order: 40 }, Banner))`。
+- 内容：右下角浮卡（宽 380px、`right/bottom: 20px`、安全区适配）；标题 + 总数；最多 3 条 pending，每行显示类型、会话标题、摘要和“打开会话”；更多显示“还有 N 项”。
+- 高度/布局：绝对定位于 overlay 层，不占 DSH 布局高度；空时返回 `null`。窄屏宽度 `min(380px, 100vw - 32px)`。
+- 样式：内联 `CSSProperties` + DSH 主题变量；圆角浮层、阴影、进入动画；`role="status"`、`aria-live="polite"`；每项是键盘可操作按钮。
 - `notify.inPage=false` 时不渲染；其 ack 走系统通知或 false。
-- 若 `shell.bottom` 已被其它插件占用或注册抛错：记录 warning，跳过页内条，继续 Web Notification/回退；不抢占、不覆盖。
+- `shell.overlay` 是 list 槽；若注册抛错：记录 warning，`bannerAvailable=false`，继续 Web Notification/回退；不抢占、不覆盖其它插件。
 - 点击只导航，不执行审批/回答；打开后由 DSH 自身的卡片处理。
 - 页内条在**真正挂载后**回调 controller；只有该回调成功才 ack `via=in-page`。若组件挂载/槽注册失败，按“页内条未显示”处理，继续尝试系统通知或 ack false。
-- 标准 DSH Web 组合提供 `shell.bottom`；若被其它插件占用/注册失败，记录 error。Host 的“手机前台提前抑制”假设页内条可用，因此这是不支持的组合错误，应修复插槽冲突，不要静默假装已提醒。
+- 标准 DSH Web 组合提供 `shell.overlay`；若注册失败，`bannerAvailable=false`，Host 的“手机前台提前抑制”不成立，按 ack/grace 处理。不要静默假装已提醒。
 
 ### 10.4 浏览器系统通知
 
@@ -891,7 +891,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 # 重启 DSH Web；浏览器刷新
 ```
 
-- bundle patch 不写死域名/凭据；首次安装后必须在 profile 配置里填 `publicBase`（否则插件按设计加载失败）。先 `transport: dryRun`，验证页内条/presence/ack/测试推送；再切 `serverchan3`。
+- bundle patch 提供 `publicBase: https://dsh.allenyou.top/` 的个人部署默认值，不写死凭据；可在插件页 Configuration 修改。先 `transport: dryRun`，验证浮动提醒卡/presence/ack/测试推送；再切 `serverchan3`。
 - 目标 profile 停用/移除 `dsh-web-ui-notify`；两者并存会重复通知。
 - nginx：整个 `/mobile/` 前缀（至少 bootstrap/config/presence/ack/push/test/health）都要走现有 oauth2-proxy 并转发到 DSH；不需要 SSE/长连接配置；DSH 只绑 loopback。若现有配置只精确代理了旧的三个路径，需要补上新增路径。
 - Client bundle 改动后需重新构建并让 DSH 提供新 bundle（HMR/重启按 DSH 行为）；Host 改动需重启 DSH。

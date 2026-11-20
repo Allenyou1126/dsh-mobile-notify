@@ -2,6 +2,7 @@
 export const NS = 'dsh-mobile-notify'
 
 const zh = {
+  'banner.title': '待处理提醒',
   'banner.approval': '需要审批',
   'banner.question': '需要回答',
   'banner.planReview': '需要确认计划',
@@ -69,9 +70,9 @@ const zh = {
   'config.question': '提问',
   'config.planReview': '计划确认',
   'config.turnDone': 'turn 完成',
-  'config.inPage': '页内条',
+  'config.inPage': '浮动提醒卡',
   'config.webNotification': '浏览器系统通知',
-  'config.inPageCounts': '页内条算已送达',
+  'config.inPageCounts': '浮动卡算已送达',
   'config.detail': '内容详细度',
   'config.detailSummary': '摘要（会话/工具/原因）',
   'config.detailTitle': '标题（仅会话）',
@@ -94,6 +95,7 @@ const zh = {
 } as const
 
 const en: Record<keyof typeof zh, string> = {
+  'banner.title': 'Pending reminders',
   'banner.approval': 'Needs approval',
   'banner.question': 'Needs an answer',
   'banner.planReview': 'Needs plan review',
@@ -161,9 +163,9 @@ const en: Record<keyof typeof zh, string> = {
   'config.question': 'Questions',
   'config.planReview': 'Plan review',
   'config.turnDone': 'Turn completion',
-  'config.inPage': 'In-page banner',
+  'config.inPage': 'Floating reminder card',
   'config.webNotification': 'Browser notifications',
-  'config.inPageCounts': 'In-page counts as delivered',
+  'config.inPageCounts': 'Floating card counts as delivered',
   'config.detail': 'Detail level',
   'config.detailSummary': 'Summary (session/tool/reason)',
   'config.detailTitle': 'Title (session only)',

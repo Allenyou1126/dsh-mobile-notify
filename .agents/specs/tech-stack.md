@@ -136,7 +136,7 @@ export const inject = ['sessions', 'slots', 'locale', 'uiSession', 'uiWorkspace'
 export function apply(ctx: Context): void { ... }
 ```
 
-- 用 `ctx.slots.inject('shell.bottom', ...)` 注册页内条；该槽不存在时只告警，不退回 DOM hack。
+- 用 `ctx.slots.inject('shell.overlay', ...)` 注册右下角浮动提醒卡；该槽不存在时只告警，不退回 DOM hack。
 - 用 `ctx.slots.inject('plugins.bundle.config', ...)` 在 **Plugins → 移动通知 → Configuration** 注册配置卡（`key = dsh-mobile-notify`）；该槽不存在时跳过，数据走 Host `/mobile/settings`。不依赖 `configForms.whileServed`，因为普通字段不是 `.volatile()`；这是与 `dsh-context` 的实现差异。
 - 用 `ctx.locale.register(NS, { zh, en })` 注册运行时文案；`locale/*.json` 供 Plugin Manager 的 `meta.*` 使用。
 - 注入 `window.__dshMobile`；在 `ctx.effect` 的清理里删除本插件设置的同名全局（仅当仍是本次注入的对象）。
@@ -234,7 +234,7 @@ await build({
 ```
 
 - banner/footer 的 `id` 必须等于包名；否则 bundle 能加载但注册不到插件。
-- 不引入 CSS Modules/lightningcss；页内条与插件页配置卡用 React 内联 `style` + DSH 主题 CSS 变量。减少一条构建链。
+- 不引入 CSS Modules/lightningcss；浮动提醒卡与插件页配置卡用 React 内联 `style` + DSH 主题 CSS 变量。减少一条构建链。
 - 不用 `tsup`/`vite`/`webpack`；这个插件只有两个入口。
 
 ### 5.3 类型来源

@@ -48,7 +48,16 @@ const primary: CSSProperties = { ...button, background: 'var(--dsh-color-accent,
 const checks: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: '8px 18px' }
 const check: CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }
 const actions: CSSProperties = { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }
-const badge: CSSProperties = { fontSize: 11, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--dsh-color-border, rgba(127,127,127,.4))' }
+const badge: CSSProperties = {
+  alignSelf: 'flex-start',
+  flexShrink: 0,
+  padding: '2px 8px',
+  borderRadius: 999,
+  border: '1px solid var(--dsh-color-border, rgba(127,127,127,.4))',
+  fontSize: 11,
+  lineHeight: 1.5,
+  whiteSpace: 'nowrap',
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -200,7 +209,7 @@ export function ConfigCard({ t, sendTest }: ConfigCardProps) {
   return (
     <form style={{ display: 'flex', flexDirection: 'column' }} onSubmit={(event) => { void save(event) }}>
       <div style={section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>{t('config.title')}</div>
             <div style={muted}>{t('config.description')}</div>

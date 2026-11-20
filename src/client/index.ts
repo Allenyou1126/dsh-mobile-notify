@@ -504,17 +504,17 @@ export function apply(ctx: ClientContext): void {
 
     ctx.effect(() => {
       let dispose: (() => void) | undefined
-      ctx.slots.inject('shell.bottom', () => {
+      ctx.slots.inject('shell.overlay', () => {
         dispose?.()
         try {
           dispose = ctx.slots.register(
-            { name: 'shell.bottom', id: NS, order: 40, locale: NS },
+            { name: 'shell.overlay', id: NS, order: 40, locale: NS },
             BannerView,
           )
           bannerAvailable = true
           scan()
         } catch (error) {
-          console.warn('dsh-mobile-notify: shell.bottom registration failed', error)
+          console.warn('dsh-mobile-notify: shell.overlay registration failed', error)
         }
       })
       return () => {
@@ -522,7 +522,7 @@ export function apply(ctx: ClientContext): void {
         dispose = undefined
         bannerAvailable = false
       }
-    }, 'dsh-mobile-notify: banner slot')
+    }, 'dsh-mobile-notify: banner overlay')
 
     const ConfigCardView = (() => createElement(ConfigCard, {
       t,

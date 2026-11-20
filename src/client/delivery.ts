@@ -19,7 +19,7 @@ export interface DeliveryDecision {
 export interface DeliveryInput {
   visible: boolean
   focused: boolean
-  /** Whether the shell.bottom slot is registered and can actually render. */
+  /** Whether the shell.overlay slot is registered and can actually render. */
   bannerAvailable: boolean
   notification: NotificationState
 }

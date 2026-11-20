@@ -1,4 +1,4 @@
-/** External store for the global bottom banner. */
+/** External store for the floating pending-reminder card. */
 import type { PendingItem } from './types.ts'
 
 export interface BannerItem {

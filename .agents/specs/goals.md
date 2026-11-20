@@ -65,7 +65,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 ### G4 客户端 Web 通知与页内提示
 
 - 观察 `ctx.uiSession.sessionStatus` 的所有会话 `pendingInteraction`（approval/question/plan-review），用 `${sessionId}:${wait.key}` 去重。
-- 页内提示：在 DSH 布局的全局底部槽（`shell.bottom`）显示待处理条/角标；点击打开对应会话。空内容不占高度。
+- 页内提示：在 DSH 的 `shell.overlay` 槽渲染右下角浮动提醒卡（标题、数量、类型/会话摘要、打开会话）；空内容不渲染，不占布局高度。
 - 浏览器系统通知：页面不可见/未聚焦且权限允许时用 `new Notification(...)`；点击聚焦并打开会话；不设 `requireInteraction`（桌面自己决定弹出时长）。
 - 客户端在显示前做约 500ms 的短去抖，自动审批的“闪一下”尽量收敛；pending 消失则取消。
 - delivered 判定：

@@ -47,6 +47,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 - `/mobile/health`：查看 transport、pending/presence 计数、最近推送结果（需 DSH 登录）。
 - 配置卡“发送测试推送”：验证 Server酱³ 链路与 TAG；dryRun 时只记录不发送。
+- 开了 `turnDone` 仍收到 Server酱³：确认浏览器通知权限为 `granted`；未授权时按规则不 ack，Host 会回退。可在配置卡点“请求通知权限”，保存 turnDone 时也会请求。
 - 浮动提醒卡不出现：检查 `shell.overlay` 是否可用，或 `notify.inPage=false`。
 - 手机收不到：先测 App 通知权限/MiPush；再测 `scopen` 拉起；最后看 Host 日志中的 `upstream_failed` / `rate_limited`。
 - `/mobile/bootstrap` 必须经 oauth2-proxy，DSH 只绑 loopback；不要直接公网暴露。

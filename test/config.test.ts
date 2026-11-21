@@ -13,6 +13,7 @@ test('minimal config fills defaults and normalizes the base URL', () => {
   assert.equal(config.notify.debounceMs, 1500)
   assert.equal(config.notify.graceMs, 4000)
   assert.equal(config.notify.inPage, true)
+  assert.equal(config.notify.modelTool, true)
   assert.deepEqual(config.serverchan3.tags.extra, [])
 })
 
@@ -59,12 +60,13 @@ test('tag configuration is validated during resolve', () => {
 test('the exported Schemastery schema fills runtime defaults', () => {
   const parsed = Config({ publicBase: 'https://dsh.example/' }) as unknown as {
     transport: string
-    notify: { debounceMs: number; inPage: boolean }
+    notify: { debounceMs: number; inPage: boolean; modelTool: boolean }
     serverchan3: { appPackage: string; tags: { namespace: string; extra: string[] } }
   }
   assert.equal(parsed.transport, 'dryRun')
   assert.equal(parsed.notify.debounceMs, 1500)
   assert.equal(parsed.notify.inPage, true)
+  assert.equal(parsed.notify.modelTool, true)
   assert.equal(parsed.serverchan3.appPackage, 'top.allenyou.dsh')
   assert.equal(parsed.serverchan3.tags.namespace, 'dsh')
   assert.deepEqual(parsed.serverchan3.tags.extra, [])

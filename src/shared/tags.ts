@@ -1,11 +1,11 @@
 /** Server酱³ tag grouping: low-cardinality, static, and testable. */
 import { ConfigError } from './errors.ts'
 
-/** Message classes this plugin can push (test is only used by the test route). */
-export type EventKind = 'approval' | 'question' | 'plan-review' | 'turn' | 'test'
+/** Message classes this plugin can push (test is the test route; notice is the model tool). */
+export type EventKind = 'approval' | 'question' | 'plan-review' | 'turn' | 'test' | 'notice'
 
 /** Config keys for kind tags. `test` is not an event but is overridable too. */
-export type KindTagKey = 'approval' | 'question' | 'planReview' | 'turn' | 'test'
+export type KindTagKey = 'approval' | 'question' | 'planReview' | 'turn' | 'test' | 'notice'
 
 export interface TagConfig {
   enabled: boolean
@@ -29,7 +29,7 @@ export const MAX_TAG_LENGTH = 32
 /** Unicode letters/numbers plus dot/underscore/hyphen; no whitespace or `|`. */
 export const TAG_PATTERN = /^[\p{L}\p{N}._-]{1,32}$/u
 
-const KIND_KEYS: readonly KindTagKey[] = ['approval', 'question', 'planReview', 'turn', 'test']
+const KIND_KEYS: readonly KindTagKey[] = ['approval', 'question', 'planReview', 'turn', 'test', 'notice']
 
 /** Map a message kind to its config key. */
 export function kindTagKey(kind: EventKind): KindTagKey {
@@ -89,7 +89,7 @@ export function validateTagConfig(config: TagConfig): void {
     assertTag(value, `serverchan3.tags.extra[${index}]`)
   }
   if (!config.enabled) return
-  const kinds: readonly EventKind[] = ['approval', 'question', 'plan-review', 'turn']
+  const kinds: readonly EventKind[] = ['approval', 'question', 'plan-review', 'turn', 'notice']
   for (const kind of kinds) {
     if (config.includeKind) assertTag(kindTag(kind, config), `serverchan3.tags for ${kind}`)
   }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { apply, type HostContext } from '../src/index.ts'
 import { quietLogger } from './helpers.ts'
 
@@ -61,13 +62,21 @@ interface FakeContext {
   ctx: HostContext
   routes: Map<string, Route>
   listeners: Map<string, (...args: unknown[]) => unknown>
+  tools: ToolDefinition[]
   cleanups: Array<() => void>
 }
 
 function makeContext(): FakeContext {
   const routes = new Map<string, Route>()
   const listeners = new Map<string, (...args: unknown[]) => unknown>()
+  const tools: ToolDefinition[] = []
   const cleanups: Array<() => void> = []
+  const toolsService = {
+    register(definition: ToolDefinition) {
+      tools.push(definition)
+      return () => { tools.splice(tools.indexOf(definition), 1) }
+    },
+  }
   const ctx = {
     logger: quietLogger,
     webServer: {
@@ -82,7 +91,7 @@ function makeContext(): FakeContext {
       authenticatedUrl: (base: string) => `${base}?token=test`,
     },
     sessions: { get: () => undefined },
-    get: () => undefined,
+    get: (name: string) => name === 'tools' ? toolsService : undefined,
     on: (event: string, listener: (...args: unknown[]) => unknown) => {
       listeners.set(event, listener)
     },
@@ -91,10 +100,10 @@ function makeContext(): FakeContext {
       if (typeof cleanup === 'function') cleanups.push(cleanup)
     },
   }
-  return { ctx: ctx as unknown as HostContext, routes, listeners, cleanups }
+  return { ctx: ctx as unknown as HostContext, routes, listeners, tools, cleanups }
 }
 
-test('apply registers seven exact paths (nine method handlers) and three event observers', () => {
+test('apply registers routes, event observers, and the mobile_notify tool', () => {
   const fake = makeContext()
   apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
   assert.deepEqual([...fake.routes.keys()].sort(), [
@@ -111,6 +120,7 @@ test('apply registers seven exact paths (nine method handlers) and three event o
     'session/event',
     'user-questions/request',
   ])
+  assert.deepEqual(fake.tools.map(tool => tool.name), ['mobile_notify'])
   for (const cleanup of fake.cleanups.reverse()) cleanup()
 })
 

@@ -69,7 +69,7 @@ function errorText(value: unknown): string {
   return ''
 }
 
-const kindKeys: readonly KindTagKey[] = ['approval', 'question', 'planReview', 'turn', 'test']
+const kindKeys: readonly KindTagKey[] = ['approval', 'question', 'planReview', 'turn', 'test', 'notice']
 
 export function ConfigCard({ t, sendTest }: ConfigCardProps) {
   const [view, setView] = useState<SettingsView | undefined>(undefined)
@@ -297,6 +297,7 @@ export function ConfigCard({ t, sendTest }: ConfigCardProps) {
           <label style={check}><input type="checkbox" checked={draft.notify.question} disabled={!editable} onChange={e => notify({ question: e.target.checked })} />{t('config.question')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.planReview} disabled={!editable} onChange={e => notify({ planReview: e.target.checked })} />{t('config.planReview')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.turnDone} disabled={!editable} onChange={e => notify({ turnDone: e.target.checked })} />{t('config.turnDone')}</label>
+          <label style={check}><input type="checkbox" checked={draft.notify.modelTool} disabled={!editable} onChange={e => notify({ modelTool: e.target.checked })} />{t('config.modelTool')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.inPage} disabled={!editable} onChange={e => notify({ inPage: e.target.checked })} />{t('config.inPage')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.webNotification} disabled={!editable} onChange={e => notify({ webNotification: e.target.checked })} />{t('config.webNotification')}</label>
           <label style={check}><input type="checkbox" checked={draft.notify.inPageCountsAsDelivered} disabled={!editable} onChange={e => notify({ inPageCountsAsDelivered: e.target.checked })} />{t('config.inPageCounts')}</label>

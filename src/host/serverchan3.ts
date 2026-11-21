@@ -4,7 +4,7 @@ import { sleep, type Clock } from './clock.ts'
 import { RateLimiter } from './rate-limit.ts'
 import { buildTags } from '../shared/tags.ts'
 import { isSendkey, uidFromSendkey } from '../shared/serverchan.ts'
-import { cleanText, escapeMarkdown, shortId, truncate } from '../shared/text.ts'
+import { cleanMultiline, cleanText, escapeMarkdown, shortId, truncate } from '../shared/text.ts'
 import type { Logger, NormalizedEvent, PushResult, Transport } from './types.ts'
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
@@ -34,7 +34,15 @@ export interface ServerChanTransportDeps {
   readonly limiter?: RateLimiter
 }
 
-function titleFor(kind: NormalizedEvent['kind'], detail: DetailLevel): string {
+function noticeTitle(event: NormalizedEvent): string {
+  const title = cleanOrEmpty(event.noticeTitle, 60)
+  const base = title === '' ? '通知' : title
+  return base.startsWith('DSH') ? base : `DSH · ${base}`
+}
+
+function titleFor(event: NormalizedEvent, detail: DetailLevel): string {
+  if (event.kind === 'notice') return noticeTitle(event)
+  const kind = event.kind
   if (detail === 'generic') {
     return kind === 'turn' ? 'DSH · 任务完成' : kind === 'test' ? 'DSH · 测试通知' : 'DSH · 有待处理提醒'
   }
@@ -50,6 +58,7 @@ function titleFor(kind: NormalizedEvent['kind'], detail: DetailLevel): string {
 function genericShort(kind: NormalizedEvent['kind']): string {
   if (kind === 'turn') return 'DSH 本轮任务完成'
   if (kind === 'test') return '这是一条测试推送'
+  if (kind === 'notice') return 'DSH 通知'
   return 'DSH 有待处理提醒'
 }
 
@@ -73,6 +82,10 @@ function cleanOrEmpty(value: string | undefined, max: number): string {
 }
 
 function buildShort(event: NormalizedEvent, config: EffectiveConfig): string {
+  if (event.kind === 'notice') {
+    const body = cleanOrEmpty(event.noticeBody, 100)
+    return body === '' ? noticeTitle(event) : body
+  }
   const detail = detailFor(config)
   if (detail === 'generic' || event.kind === 'test') return genericShort(event.kind)
   const parts: string[] = []
@@ -93,7 +106,7 @@ function buildShort(event: NormalizedEvent, config: EffectiveConfig): string {
 
 /** Build the single-line `scopen://` link, or undefined for an invalid session id. */
 export function buildScopenUrl(event: NormalizedEvent, config: EffectiveConfig): string | undefined {
-  if (event.kind === 'test') return undefined
+  if (event.kind === 'test' || event.sessionId === '') return undefined
   if (!SESSION_ID_PATTERN.test(event.sessionId)) return undefined
   const requestId = event.callId ?? (event.turn === undefined ? undefined : String(event.turn))
   const params: Array<readonly [string, string]> = [
@@ -116,6 +129,12 @@ function linkLine(event: NormalizedEvent, config: EffectiveConfig): string {
 function buildDesp(event: NormalizedEvent, config: EffectiveConfig): string {
   if (event.kind === 'test') {
     return `这是一条来自 DeepSeek Harness 的测试推送。\n\n${linkLine(event, config)}`
+  }
+  if (event.kind === 'notice') {
+    const body = cleanMultiline(event.noticeBody, 1000)
+    const lines = body === undefined ? [] : [escapeMarkdown(body), '']
+    lines.push(linkLine(event, config))
+    return lines.join('\n')
   }
   const detail = detailFor(config)
   const lines: string[] = []
@@ -150,7 +169,7 @@ function buildDesp(event: NormalizedEvent, config: EffectiveConfig): string {
 export function buildPayload(event: NormalizedEvent, config: EffectiveConfig): BuiltPayload {
   const { tags, dropped } = buildTags(event.kind, config.serverchan3.tags)
   const payload: Payload = {
-    title: titleFor(event.kind, config.notify.detail),
+    title: titleFor(event, config.notify.detail),
     desp: buildDesp(event, config),
     short: buildShort(event, config),
   }

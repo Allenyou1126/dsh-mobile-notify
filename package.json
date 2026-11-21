@@ -1,9 +1,9 @@
 {
   "name": "dsh-mobile-notify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Web-first notifications for DeepSeek Harness approvals/questions, with Server酱³ App fallback and scopen deep links.",
+  "description": "Web-first notifications for DeepSeek Harness approvals/questions, with Server酱³ App fallback, scopen deep links, and a model-facing mobile_notify tool.",
   "author": "Allenyou1126",
   "repository": {
     "type": "git",
@@ -66,6 +66,7 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.5",
     "@deepseek-ai/schemastery": "3.19.0",
     "@types/node": "^22.19.0",
     "@types/react": "~18.3.0",

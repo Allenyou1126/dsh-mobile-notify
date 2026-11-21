@@ -16,6 +16,7 @@ test('default tags follow namespace + kind order', () => {
   assert.deepEqual(buildTags('plan-review', config).tags, ['dsh', 'dsh-plan-review'])
   assert.deepEqual(buildTags('turn', config).tags, ['dsh', 'dsh-turn'])
   assert.deepEqual(buildTags('test', config).tags, ['dsh', 'dsh-test'])
+  assert.deepEqual(buildTags('notice', config).tags, ['dsh', 'dsh-notice'])
   assert.equal(tagString('approval', config), 'dsh|dsh-approval')
 })
 

@@ -28,6 +28,24 @@ export function cleanTextOrEmpty(value: unknown, max: number): string {
   return cleanText(value, max) ?? ''
 }
 
+/**
+ * Clean one optional multi-line text value: control characters become spaces,
+ * runs of spaces/tabs collapse, blank lines are limited to one, and the result
+ * is truncated by code points. Line breaks are preserved for Markdown bodies.
+ */
+export function cleanMultiline(value: unknown, max: number): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value
+    .replace(/\r\n?/gu, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
+    .replace(/[ \t]+/gu, ' ')
+    .replace(/ *\n */gu, '\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim()
+  if (text === '') return undefined
+  return truncate(text, max)
+}
+
 /** Escape characters that could change Markdown structure in a value line. */
 export function escapeMarkdown(value: string): string {
   return value.replace(/([\\`*_{}[\]()#<>|~])/gu, '\\$1')

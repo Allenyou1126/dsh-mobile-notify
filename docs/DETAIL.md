@@ -1,11 +1,12 @@
 # dsh-mobile-notify
 
-审批、提问和（可选）turn-done 的 Web 优先通知插件。
+审批、提问、（可选）turn-done 和模型主动推送的 Web 优先通知插件。
 
 - **Web 优先**：页面可见且聚焦时在右下角弹出浮动提醒卡；如果当前正在查看的就是触发事件的那个 Session，不弹卡（会话内已显示 pending），按已提醒处理。页面隐藏/未聚焦时使用浏览器系统通知。
 - **手机回退**：只有 Web 未成功提醒、且 Android Shell 不在前台时，才通过 Server酱³ App 推送。
 - **深链**：Server酱³ 消息里的 `scopen://top.allenyou.dsh?...` 可由 Android 薄壳拉起并回到对应会话。
-- **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test`，可在 Server酱³ App 内过滤。
+- **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test` / `dsh-notice`，可在 Server酱³ App 内过滤。
+- **模型主动推送**：`mobile_notify` 工具允许模型在用户明确要求时，直接推送一条自定义标题/正文通知；可在配置卡关闭。
 
 ## 安装
 
@@ -23,14 +24,28 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 3. 在配置卡填写 App 版 `sctp...` SendKey。它写入 DSH `credentials`，不会出现在 profile 配置或客户端响应中；可随时清除。
 4. 确认手机 App 通知权限、MiPush 和 `scopen` 关联启动已放行。
 5. 旧通知插件应已移除（本次安装已执行）；不要与 `dsh-web-ui-notify` 同时启用。
+6. 需要模型主动推送时，确认配置卡“提醒行为 → 允许模型主动推送（mobile_notify）”开启；`dryRun` 下会让模型调用一次即可验证。
 
 配置卡保存普通字段后 DSH 会重启本插件；“保存请求已发出，正在确认…”期间不要重复提交。完整字段和 TAG 规则见仓库 `.agents/specs/architecture.md` §8.3 / §9 / §10；本文件不重复维护。
+
+## 模型主动推送
+
+`mobile_notify` 接收 `title`（必填，最多 60 字符）和 `body`（可选，最多 1000 字符，保留换行）。它直接使用当前推送通道，不等待 Web ack，也不参与审批/提问的 Web-first 回退。
+
+- 标题显示为 `DSH · <title>`；正文由模型提供，不受 `detail` 降级影响。
+- 默认 TAG 为 `dsh|dsh-notice`，可在“逐项覆盖事件 Tag”中改 `notice`。
+- 当前会话有效时附 `scopen://...&kind=notice`；否则使用配置的网页地址。
+- 失败以工具错误返回；`dryRun` 只记录并返回 `dryRun: true`。
+- 在 **Configuration → 提醒行为** 关闭“允许模型主动推送”后，模型不再看到该工具。
+
+该工具用于“跑完通知我”这类明确请求；不要用它复述普通回复或替代审批/提问提醒。
 
 ## TAG 用法
 
 - `dsh`：全部 DSH 消息。
 - `dsh-approval` / `dsh-question` / `dsh-plan-review`：需要处理的入口。
 - `dsh-test`：配置卡“发送测试推送”的测试消息；可在 App 内单独过滤/清理。
+- `dsh-notice`：模型通过 `mobile_notify` 主动推送的消息；默认 `kindTags.notice` 可覆盖。
 - 不使用会话名/原因/sessionId 做动态 Tag；Tag 总数默认 ≤8，`extra` ≤6。
 - Tag 只有在出现含它的消息后才会出现在 App 侧栏；先发一次测试推送再设置过滤偏好。
 

@@ -29,6 +29,9 @@ export interface NormalizedEvent {
   readonly reason?: string
   readonly question?: string
   readonly turn?: number
+  /** Model-authored title/body for `kind: 'notice'`; never read from DSH events. */
+  readonly noticeTitle?: string
+  readonly noticeBody?: string
   readonly createdAt: number
   /** Turn notifications are not resolved by a waterfall; remove after delivery. */
   readonly oneShot?: boolean

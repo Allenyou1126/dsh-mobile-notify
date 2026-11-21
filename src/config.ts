@@ -15,6 +15,8 @@ export interface NotifyConfig {
   question: boolean
   planReview: boolean
   turnDone: boolean
+  /** Expose the model-facing `mobile_notify` tool. */
+  modelTool: boolean
   debounceMs: number
   graceMs: number
   settleMs: number
@@ -82,6 +84,7 @@ const tagsSchema = Schema.object({
     planReview: Schema.string(),
     turn: Schema.string(),
     test: Schema.string(),
+    notice: Schema.string(),
   }).default({}),
   extra: Schema.array(Schema.string()).default([]),
 }).default({})
@@ -97,6 +100,7 @@ const notifySchema = Schema.object({
   question: Schema.boolean().default(true),
   planReview: Schema.boolean().default(true),
   turnDone: Schema.boolean().default(false),
+  modelTool: Schema.boolean().default(true),
   debounceMs: Schema.number().default(1500),
   graceMs: Schema.number().default(4000),
   settleMs: Schema.number().default(500),
@@ -225,6 +229,7 @@ export function resolveConfig(input: Config): EffectiveConfig {
     question: boolValue(notifyInput.question, true, 'notify.question'),
     planReview: boolValue(notifyInput.planReview, true, 'notify.planReview'),
     turnDone: boolValue(notifyInput.turnDone, false, 'notify.turnDone'),
+    modelTool: boolValue(notifyInput.modelTool, true, 'notify.modelTool'),
     debounceMs: intValue(notifyInput.debounceMs, 1500, 0, 10_000, 'notify.debounceMs'),
     graceMs: intValue(notifyInput.graceMs, 4000, 0, 30_000, 'notify.graceMs'),
     settleMs: intValue(notifyInput.settleMs, 500, 0, 2000, 'notify.settleMs'),

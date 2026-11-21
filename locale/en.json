@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Mobile notifications",
-    "description": "Web-first notifications for approvals and questions, with Server酱³ fallback and scopen deep links.",
+    "description": "Web-first notifications for approvals/questions, Server酱³ fallback, scopen deep links, and the model-facing mobile_notify tool.",
     "detail": "docs/DETAIL.md"
   }
 }

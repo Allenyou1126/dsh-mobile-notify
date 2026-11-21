@@ -8,10 +8,11 @@ import { PresenceStore } from './host/presence.ts'
 import { SettingsService, configEditorOf } from './host/settings.ts'
 import { registerRoutes, type RouteConnection, type RouteWebServer } from './host/routes.ts'
 import { ServerChanTransport } from './host/serverchan3.ts'
+import { registerNotifyTool } from './host/tool.ts'
 import type { LastPush, Logger } from './host/types.ts'
 
 export const name = 'dsh-mobile-notify'
-export const inject = ['webServer', 'connection', 'sessions']
+export const inject = ['webServer', 'connection', 'sessions', 'tools']
 
 export { Config }
 
@@ -65,6 +66,20 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
 
   registerEventObservers(ctx, engine, { turnDone: config.notify.turnDone })
 
+  registerNotifyTool(ctx, {
+    config,
+    transport,
+    logger: ctx.logger,
+    clock,
+    onPushResult: result => {
+      health.lastPush = {
+        at: new Date().toISOString(),
+        ok: result.ok,
+        kind: 'notice',
+      }
+    },
+  })
+
   ctx.effect(
     () => registerRoutes(
       { webServer: ctx.webServer, connection: ctx.connection },
@@ -74,7 +89,7 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
         engine,
         logger: ctx.logger,
         clock,
-        version: '0.1.0',
+        version: '0.2.0',
         health,
         settings,
         sendTest: signal => transport.sendTest(signal),

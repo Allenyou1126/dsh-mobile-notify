@@ -12,6 +12,7 @@
 | 插件框架 | DSH 原生 Cordis 插件（Host `apply/Config`） | 不引入第二套生命周期；effect 自动释放 |
 | 包形态 | **单包双面**：一个 `package.json` 同时声明 `dsh.bundle` + `dsh.client` | 一次安装、一份配置、Host/Client 协议不漂移 |
 | 配置校验 | `@deepseek-ai/schemastery`（DSH 自带） | DSH 官方 Config 形态；加载时失败、可操作 |
+| 模型工具 | `@deepseek-ai/dsh-tools` 的 `defineTool`（DSH 自带） | 参数/输出 schema 与工具执行走 DSH 官方管线；运行时不打包 |
 | HTTP 服务 | DSH `ctx.webServer.register` + Node `IncomingMessage/ServerResponse` | 不引入 Express/Koa；只注册 6 个精确路由 |
 | 认证 | DSH 浏览器 Cookie + `ctx.connection.requestRejection/admit` | 不引入 deviceToken/配对；复用现有 oauth2 会话 |
 | 外发 HTTP | Node 内置 `fetch` + `AbortSignal.timeout` | 零第三方依赖；足够处理一次 JSON POST |
@@ -64,7 +65,7 @@
 ```json
 {
   "name": "dsh-mobile-notify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -114,7 +115,7 @@
 
 ```ts
 export const name = 'dsh-mobile-notify'
-export const inject = ['webServer', 'connection', 'sessions']
+export const inject = ['webServer', 'connection', 'sessions', 'tools']
 export const Config: Schema<Config> = ...
 export function apply(ctx: Context, config: Config): void { ... }
 ```
@@ -123,10 +124,11 @@ export function apply(ctx: Context, config: Config): void { ... }
 - 所有路由由 `registerRoutes()` 一次性注册；同一 path 的 GET/PUT 在 handler 内按 method 分派（DSH 不允许重复 exact path）。注册失败时先撤销已注册路由再抛错，避免 HMR 残留半套路由。
 - `sessionTitle` 是可选服务：`ctx.get('sessionTitle')`，缺失时用短 sessionId，不阻塞加载。
 - 不注入 `approval`/`userQuestions` 服务（只观察事件），避免不必要的加载顺序依赖。
+- `tools` 是必需的：Host 通过 `defineTool` 注册 `mobile_notify`；`notify.modelTool=false` 时只跳过工具，不影响路由/事件。
 - 加载失败策略：
   - `publicBase` 缺失/非法 → Config 校验失败；bundle patch 给 `https://dsh.allenyou.top/` 默认值，安装后即可进配置页；
   - `transport=serverchan3` 无 SendKey → 插件仍加载，发送时返回 credentials missing；配置卡可写入 SendKey；
-  - `webServer`/`connection`/`sessions` 缺失 → 依赖注入失败，不静默降级。
+  - `webServer`/`connection`/`sessions`/`tools` 缺失 → 依赖注入失败，不静默降级；`mobile_notify` 注册失败只 warning。
 - SendKey 通过 `ctx.get('credentials')` 读取，不进入 Config；配置卡保存走 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`。
 
 ### 3.3 Client 入口
@@ -240,7 +242,7 @@ await build({
 
 ### 5.3 类型来源
 
-> **实现修订（2026-11-20）**：v1 代码在 DSH 边界使用窄结构接口（Host `HostContext` / Client `ClientContext`），不 import 完整 DSH 类型包；只保留 `@deepseek-ai/schemastery` 与 React 类型为开发依赖。这样构建/测试不依赖 pnpm 类型农场，但**升级 DSH 时必须按本节核对文档/源码并补回归**。下面的完整 DSH 类型包方案保留给后续需要更严格契约检查时使用。
+> **实现修订（2026-11-20，2026-11-21 更新）**：v1 代码在 DSH 边界使用窄结构接口（Host `HostContext` / Client `ClientContext`），不 import 完整 DSH 类型包；只保留 `@deepseek-ai/schemastery`、`@deepseek-ai/dsh-tools` 与 React 类型为开发依赖。`dsh-tools` 仅用于 `defineTool` 的参数/输出 schema 与类型；它在运行期由 DSH 提供，不打进 bundle。这样构建/测试不依赖 pnpm 类型农场，但**升级 DSH 时必须按本节核对文档/源码并补回归**。
 
 - 类型检查针对**本机安装的 DSH `0.2.2-rc.5`**，不针对记忆或旧版本。
 - 首选：`devDependencies` 精确锁 `0.2.2-rc.5` 的 DSH 类型包（`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-user-approval`、`@deepseek-ai/dsh-user-questions`、`@deepseek-ai/dsh-client-ui-session`、`@deepseek-ai/dsh-client-ui-slots`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-workspace` 等，具体以实际包名为准）。
@@ -282,8 +284,8 @@ await build({
 ## 7. 依赖策略
 
 - **零第三方运行时依赖**：`dependencies` 为空。
-- 允许使用 DSH 宿主提供的运行时包：`@deepseek-ai/schemastery`（Config）、React 及 DSH Client 模块（由前端模块表提供）。它们不打进 bundle。
-- 开发依赖仅：`typescript`、`esbuild`、`@types/node`、`@types/react`，以及 §5.3 的类型包。
+- 允许使用 DSH 宿主提供的运行时包：`@deepseek-ai/schemastery`（Config）、`@deepseek-ai/dsh-tools`（`defineTool`）、React 及 DSH Client 模块（由前端模块表提供）。它们不打进 bundle。
+- 开发依赖仅：`typescript`、`esbuild`、`@types/node`、`@types/react`、`@deepseek-ai/dsh-tools`（类型/测试），以及 §5.3 的类型包。
 - 不引入：`zod`（手写 2KB 级校验足够）、`axios`、`express`、`ws`、`pino`、`dotenv`、`date-fns`、`nanoid`（`crypto.randomUUID`）、`lodash`。
 - 不依赖 Server酱³ SDK：官方只有 HTTP API；自己封一个 100 行适配器更可控。
 - 不用 `npm`/`yarn`：仓库/profile 都用 pnpm；提交 `pnpm-lock.yaml`（代码开始后）。
@@ -299,9 +301,9 @@ await build({
 - `serverchan3.appPackage/fallbackUrl`：有默认值；`uid` 从 SendKey 解析。
 - SendKey：**不写配置**；在配置卡输入，Host 存 DSH credentials（`dsh-mobile-notify/serverchan3`）。配置卡只回传 `{configured,writable,available}`，不回传值。
 - 图形配置：`/mobile/settings` GET/PUT + `configEditor`；普通字段保存会重启插件。SendKey 写入/清除也走该 API。
-- `serverchan3.tags.*`：`enabled`、`namespace`、`includeNamespace`、`includeKind`、`kindTags`、`extra`；默认 `dsh` + `dsh-<kind>`，只做低基数分组。
+- `serverchan3.tags.*`：`enabled`、`namespace`、`includeNamespace`、`includeKind`、`kindTags`、`extra`；默认 `dsh` + `dsh-<kind>`（含 `dsh-notice`），只做低基数分组。
 - **TAG 的用法**：官方 API 的 `tags` 是 `|` 分隔的字符串，App 会按消息自动聚合 Tag、允许过滤/阅读偏好，但不能手工改名/删除；所以只用稳定、低基数的分组，不用会话名/原因/sessionId。细节见 [architecture.md](architecture.md) §8.3。
-- `notify.*`：事件开关、`debounceMs`、`graceMs`、`detail`、`inPageCountsAsDelivered`、`webNotification`、`inPage`。
+- `notify.*`：事件开关、`modelTool`（是否注册 `mobile_notify`）、`debounceMs`、`graceMs`、`detail`、`inPageCountsAsDelivered`、`webNotification`、`inPage`。
 - `privacy.*`：会话标题/原因/工具名是否进入摘要。
 - `limits.*`：body 大小、限流、推送超时/重试/每分钟上限。
 

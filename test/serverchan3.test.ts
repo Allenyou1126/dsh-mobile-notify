@@ -70,6 +70,61 @@ test('test pushes use the test tag and never create a scopen link', () => {
   assert.doesNotMatch(built.payload.desp, /scopen:/u)
 })
 
+test('model notices use the explicit title/body and the notice tag', () => {
+  const event = makeEvent({
+    kind: 'notice',
+    sessionTitle: '',
+    noticeTitle: 'Build finished',
+    noticeBody: 'All tests pass.\nReady to deploy.',
+  })
+  const built = buildPayload(event, config())
+  assert.equal(built.payload.title, 'DSH · Build finished')
+  assert.equal(built.payload.short, 'All tests pass. Ready to deploy.')
+  assert.equal(built.payload.tags, 'dsh|dsh-notice')
+  assert.match(built.payload.desp, /All tests pass\.\nReady to deploy\./u)
+  assert.match(built.payload.desp, /scopen:\/\/top\.allenyou\.dsh\?/u)
+  assert.match(built.payload.desp, /kind=notice/u)
+  const link = buildScopenUrl(event, config())
+  assert.ok(link !== undefined)
+  assert.match(link, /sessionId=session-1/u)
+  assert.doesNotMatch(link, /requestId=/u)
+})
+
+test('model notices keep explicit content even in generic detail mode', () => {
+  const event = makeEvent({
+    kind: 'notice',
+    sessionTitle: '',
+    noticeTitle: 'Build finished',
+    noticeBody: 'All tests pass.',
+  })
+  const built = buildPayload(event, config({ notify: { detail: 'generic' } }))
+  assert.equal(built.payload.title, 'DSH · Build finished')
+  assert.equal(built.payload.short, 'All tests pass.')
+  assert.match(built.payload.desp, /All tests pass\./u)
+})
+
+test('model notices without a session use the fallback URL', () => {
+  const event = makeEvent({
+    kind: 'notice',
+    sessionId: '',
+    sessionTitle: '',
+    noticeTitle: 'Build finished',
+    noticeBody: 'All tests pass.',
+  })
+  assert.equal(buildScopenUrl(event, config()), undefined)
+  const built = buildPayload(event, config())
+  assert.match(built.payload.desp, /\n\[打开 DSH\]\(https:\/\/dsh\.example\/\)/u)
+})
+
+test('a notice title that already starts with DSH is not prefixed twice', () => {
+  const built = buildPayload(makeEvent({
+    kind: 'notice',
+    sessionTitle: '',
+    noticeTitle: 'DSH 构建完成',
+  }), config())
+  assert.equal(built.payload.title, 'DSH 构建完成')
+})
+
 test('dryRun does not call fetch and returns a dry-run result', async () => {
   const calls: string[] = []
   const transport = new ServerChanTransport({

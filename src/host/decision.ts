@@ -55,6 +55,7 @@ function isEnabled(config: EffectiveConfig, kind: NormalizedEvent['kind']): bool
     case 'question': return config.notify.question
     case 'plan-review': return config.notify.planReview
     case 'turn': return config.notify.turnDone
+    case 'notice': return false
     case 'test': return false
   }
 }

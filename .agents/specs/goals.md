@@ -28,7 +28,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 ### G1 Host 事件观察与归一化
 
 - 用 `prepend: true` 观察 `approval/request` 和 `user-questions/request` waterfall，**不阻塞、不改变审批链**；观察者调用 `next()` 拿结果，推送逻辑异步执行。
-- 把事件归一化为统一记录：`kind`（`approval` / `question` / `plan-review` / `turn`）、`sessionId`、`callId?`、会话标题、工具名/原因/问题摘要、创建时间。
+- 把事件归一化为统一记录：`kind`（`approval` / `question` / `plan-review` / `turn`；模型工具另用 `notice`）、`sessionId`、`callId?`、会话标题、工具名/原因/问题摘要、创建时间。
 - `session/event` 的 `turn/end` 只作为可选 turn-done 来源；默认不推送。
 - 自动审批去抖 `debounceMs=1500`：`next()` 在去抖窗口内返回时 Host 不通知/不推送；Web 端可能因 DSH 自身状态短暂闪一下。
 - 事件 resolved 后删除 pending、取消尚未发出的推送；已发出的 Server酱³ 不撤回（API 不支持）。
@@ -57,7 +57,7 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 - 用 DSH credentials 中的 SendKey（解析出 uid）调 `POST https://<uid>.push.ft07.com/send/<sendkey>.send`。
 - 推送正文包含单行、正确 percent-encode 的 `scopen://top.allenyou.dsh?...` 深链；`sc.market=0`、`sc.fallback=<publicBase>`；不带 token/SendKey/代码/完整工具参数。
 - 支持 `detail=summary|title|generic` 隐私档位；默认 summary（用户已选择显示摘要）。
-- **TAG 分组**：默认 `dsh`（全部）+ `dsh-approval`/`dsh-question`/`dsh-plan-review`/`dsh-turn`/`dsh-test`；可配 namespace、是否发 catch-all/kind、逐项覆盖、额外 Tag。TAG 只做低基数、稳定分组，不用会话名/原因/sessionId 等动态内容；详细规则见 [architecture.md](architecture.md) §8.3。
+- **TAG 分组**：默认 `dsh`（全部）+ `dsh-approval`/`dsh-question`/`dsh-plan-review`/`dsh-turn`/`dsh-test`/`dsh-notice`；可配 namespace、是否发 catch-all/kind、逐项覆盖、额外 Tag。TAG 只做低基数、稳定分组，不用会话名/原因/sessionId 等动态内容；详细规则见 [architecture.md](architecture.md) §8.3。
 - 失败重试 2 次、超时 8s、默认最多 50 条/分钟；失败只写日志，**不阻塞审批链**。
 - `dryRun` 模式只记录 payload（脱敏），不发网络请求；首次安装/联调默认用它。
 - 实现是 Server酱³ **App 版**（`sctp...` SendKey），不是 Server酱 Turbo 的微信通道。
@@ -111,6 +111,15 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 - 路由与事件用 fake `ctx` 驱动；客户端纯函数用 fake DOM/`Notification` 驱动。
 - 文档说明：安装、配置、隐私档位、故障排查、与 Shell 的契约边界、真机验证范围。
 - 质量门禁：`pnpm check`（类型检查 + 测试 + 构建）通过。
+
+### G9 模型主动推送工具
+
+- 提供 `mobile_notify` 工具，让模型在用户明确要求时直接推送一条自定义标题/正文通知。
+- 参数 `title`（必填，≤60）与 `body`（可选，≤1000，保留换行）；清洗控制字符、转义 Markdown，不读审批/会话正文。
+- 直接走已配置 transport（`serverchan3`/`dryRun`），不进入 pending/ack，不使用 Web-first 回退；受 `pushPerMinute`、超时/重试和 SendKey 约束。
+- 默认 TAG `dsh-notice`；当前会话有效时附 `kind=notice` 的 `scopen` 深链，否则用 `fallbackUrl`。
+- `notify.modelTool=false` 时不注册；注册/发送失败只影响工具，不影响审批/提问通知。
+- 配置卡提供开关；README/DETAIL 说明适用场景、长度限制和隐私边界。
 
 ## 3. 非目标
 
@@ -204,7 +213,7 @@ dsh-mobile-notify/
 
 **总预算**：本仓库约 2 周（不含 Shell 仓库的 M3 工作），与 DECISION“总计 2–3 周”一致。不要为了提前演示跳过 M1 的决策状态机测试；它是唯一容易悄悄错的逻辑。
 
-**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 浮动提醒卡/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials 已实现。75 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例已重启并运行。浮动提醒卡已改为右下角浮层，并支持“当前正在查看的 Session 不弹卡”。M3 真机验证、M4 连续使用仍未执行。
+**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 浮动提醒卡/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials、`mobile_notify` 已实现。85 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例已重启并运行。浮动提醒卡已改为右下角浮层，并支持“当前正在查看的 Session 不弹卡”。M3 真机验证、M4 连续使用仍未执行。
 
 ## 7. 验收清单
 
@@ -234,6 +243,7 @@ dsh-mobile-notify/
 | A18 | 插件页 Configuration | 在 Plugins → 移动通知 → Configuration 可读取/保存 publicBase、transport、TAG、notify/privacy/limits；SendKey 只显示已配置状态，可写入/清除；保存后插件可恢复运行，响应不含 SendKey |
 | A19 | 当前正在查看触发事件的 Session | 页面可见/聚焦时不弹浮动卡；ack `delivered=true, via=in-page`，不推 Server酱³；页面隐藏/失焦仍可按系统通知/回退处理 |
 | A20 | 当前查看同一 Session 但页面隐藏/失焦 | 不弹浮动卡；走浏览器系统通知或回退，不因“当前会话”误抑制 |
+| A21 | 模型调用 `mobile_notify` | 指定标题/正文直接推送（或 dryRun 记录）；带 `dsh-notice` TAG 和当前会话深链；不进入审批 pending/ack；关闭 `notify.modelTool` 后工具不可见 |
 
 ### 7.2 安全与错误
 
@@ -251,6 +261,7 @@ dsh-mobile-notify/
 | S10 | TAG 中含会话名/原因/sessionId/SendKey | 不允许；TAG 只来自配置的稳定分组，不含动态内容 |
 | S11 | TAG 非法/超长/超过数量上限 | 插件加载失败并说明字段；不在发送时静默截断（运行期意外值丢弃并 warning） |
 | S12 | 配置卡保存 SendKey | 只回传 configured/writable/available；不进入 Config、日志、GET 响应或 React 持久化；清除后 record 删除 |
+| S13 | `mobile_notify` 标题/正文超长或含控制字符 | 工具返回明确错误；`desp` 转义 Markdown；日志不记录正文 |
 
 ### 7.3 工程
 

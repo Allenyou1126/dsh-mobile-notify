@@ -1,6 +1,6 @@
 # dsh-mobile-notify
 
-> Web-first notifications for DeepSeek Harness — in-page cards and browser notifications first, Server酱³ App only as a fallback.
+> Web-first notifications for DeepSeek Harness — in-page cards and browser notifications first, Server酱³ App only as a fallback, plus a `mobile_notify` tool for explicit model-initiated pushes.
 
 DeepSeek Harness 的 Web 优先通知插件（Host + Client bundle）。它不会一有审批或提问就推手机，而是先在 DSH 页面内提醒；只有 Web 侧没有成功提醒、且 Android Shell 不在前台时，才通过 Server酱³ App 推送。推送可以带 `scopen` 深链，并用低基数 TAG 在 App 内分组过滤。
 
@@ -10,9 +10,10 @@ DeepSeek Harness 的 Web 优先通知插件（Host + Client bundle）。它不�
 - **当前会话不打扰**：事件属于你正在查看的 Session 时，不重复弹浮动卡；DSH 会话内已经显示 pending，按已提醒处理。
 - **浏览器通知**：页面隐藏或未聚焦时使用 Web Notification；通知成功显示后会 ack，Host 不再推送 Server酱³。
 - **turn 完成**：可选开启。Client 观察 `running: true → false`，成功显示 Web Notification 后才抑制 Server酱³；不生成浮动卡。
+- **模型主动推送**：新增 `mobile_notify` 工具。模型可在你明确要求时直接推送一条自定义标题/正文通知；默认带 `dsh-notice` TAG，并附当前会话的 `scopen` 深链。可在配置卡关闭该工具。
 - **Server酱³ 回退**：只有 Web 未成功提醒、且 Android Shell 不在前台时才发送；不会无条件把所有事件推手机。
 - **`scopen` 深链**：消息里的 `scopen://top.allenyou.dsh?...` 可由配套 Android 薄壳拉起并回到会话；薄壳不在本仓库。
-- **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test`；只用稳定分组，不用会话名/原因等动态内容。
+- **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test` / `dsh-notice`；只用稳定分组，不用会话名/原因等动态内容。
 - **图形配置**：在 **Plugins → 移动通知 → Configuration** 完成，不用手工编辑服务器配置。
 - **密钥隔离**：Server酱³ SendKey 存入 DSH `credentials`，不写入配置、不返回浏览器。
 
@@ -27,6 +28,8 @@ Host decision engine
         ├── Client 浮动卡 / Web Notification 成功 ──► delivered ack ──► 抑制 Server酱³
         │
         └── Web 未成功提醒、手机不在前台 ─────────► Server酱³ App
+
+模型调用 mobile_notify ───────────────────────────► Server酱³ App（立即发送，不等待 Web）
 ```
 
 Host 使用 presence（页面可见/聚焦、Android Shell 前后台）和 Client ack 决定是否回退；Client 在页内提醒真正挂载、浏览器通知确认显示后发 ack。
@@ -76,7 +79,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 | SendKey | Server酱³ App 的 `sctp...` 密钥。写入 DSH credentials，页面只显示“已配置”，可清除。 |
 | Android 包名 / fallback URL | `scopen` 拉起目标与拉起失败时的网页地址；使用自己的薄壳时改成自己的包名。 |
 | TAG 分组 | 启用/关闭、namespace、是否发送 catch-all/事件 Tag、逐项覆盖、额外 Tag。 |
-| 提醒行为 | 审批、提问、计划确认、turn 完成；浮动卡、Web Notification、严格/普通送达、切换等待时间。 |
+| 提醒行为 | 审批、提问、计划确认、turn 完成；是否向模型暴露 `mobile_notify`；浮动卡、Web Notification、严格/普通送达、切换等待时间。 |
 | 内容详细度 / 隐私 | `summary` / `title` / `generic`，以及会话标题、原因、工具名是否进入通知。 |
 | 高级限额 | 请求体、入站限流、推送频率/超时/重试。 |
 
@@ -95,6 +98,33 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 权限为 `default`/`denied`、或通知显示失败时，不会产生成功 ack，Host 仍可能按回退规则推 Server酱³。这是有意的：只有真正成功的 Web Notification 才算 Web 已送达。
 
+## 模型主动推送（`mobile_notify`）
+
+插件向模型提供一个 `mobile_notify` 工具。它用于**用户明确要求通知**的场景，例如：
+
+- “跑完后推一条通知给我。”
+- “构建完成后提醒我。”
+- “十分钟后如果还在跑，就通知我。”
+
+工具参数：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `title` | 是 | 通知标题，最多 60 字符；最终显示为 `DSH · <title>`。 |
+| `body` | 否 | 纯文本正文，最多 1000 字符；保留换行。省略时使用标题。 |
+
+行为：
+
+- 直接走当前配置的推送通道（`Server酱³` 或 `dryRun`），**不等待** Web 页面 ack，也不使用审批/提问的 Web-first 回退。
+- 标题/正文由模型显式提供，不受 `detail=generic` 的字段降级影响；正文仍会清洗控制字符并转义 Markdown。
+- 带默认 TAG `dsh|dsh-notice`；可在配置卡“逐项覆盖事件 Tag”里改 `notice`。
+- 当前会话 id 有效时，正文附 `scopen://...&kind=notice`，点击可回到该会话；没有会话时回退到配置的网页地址。
+- 受 `limits.pushPerMinute`、推送超时/重试和 SendKey 约束；失败会以工具错误返回给模型。
+- `transport=dryRun` 时只记录，工具返回 `dryRun: true`，不会真正发送。
+- 配置卡“提醒行为 → 允许模型主动推送（mobile_notify）”可关闭；关闭后模型看不到该工具。
+
+> 该工具只应在用户要求通知时调用；模型不应把普通回复、审批或提问重复推送成额外通知。
+
 ## Server酱³ TAG
 
 Server酱³ 的 `tags` 是 `|` 分隔的字符串；App 会按消息自动聚合 Tag，并支持过滤/阅读偏好，但不能手工改名或删除 Tag。
@@ -109,6 +139,7 @@ Server酱³ 的 `tags` 是 `|` 分隔的字符串；App 会按消息自动聚合
 | 计划确认 | `dsh-plan-review` |
 | turn 完成 | `dsh-turn` |
 | 测试推送 | `dsh-test` |
+| 模型主动推送 | `dsh-notice` |
 
 - 只使用稳定、低基数的分组；不使用会话名、原因、sessionId 或 SendKey 做 Tag。
 - 总数默认 ≤ 8；额外 Tag ≤ 6，每个 1–32 字符。
@@ -130,6 +161,7 @@ Server酱³ 的 `tags` 是 `|` 分隔的字符串；App 会按消息自动聚合
 - Server酱³ 的锁屏详情、Tag 过滤和阅读偏好由 App 控制，插件无法替用户设置。
 - `turnDone` 默认关闭；它没有浮动卡，只有成功显示 Web Notification 才抑制 Server酱³。
 - `turnDone` 不推子代理；无法可靠判定时保守不推。
+- `mobile_notify` 直接推送、不等待 Web ack，也不替代审批/提问的 Web-first 回退；关闭后模型不再看到该工具。
 - 当前阶段未做真实 HyperOS/MIUI 设备、MiPush 和 `scopen` 关联启动的端到端验证；`dryRun` 与 Web 侧已验证。
 
 ## 开发
@@ -150,4 +182,4 @@ npm test
 
 ## 状态
 
-`0.1.0`，M1 Host + M2 Client + M2.5 安装/图形配置已实现；75 项单元测试和构建通过。真机与 HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。
+`0.2.0`，M1 Host + M2 Client + M2.5 安装/图形配置 + `mobile_notify` 主动推送已实现；85 项单元测试和构建通过。真机与 HyperOS 的 Server酱³、MiPush、`scopen` 拉起仍需实机验证。

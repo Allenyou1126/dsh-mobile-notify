@@ -90,7 +90,7 @@ test('model notices use the explicit title/body and the notice tag', () => {
   assert.doesNotMatch(link, /requestId=/u)
 })
 
-test('model notices keep explicit content even in generic detail mode', () => {
+test('model notices follow the generic detail privacy level', () => {
   const event = makeEvent({
     kind: 'notice',
     sessionTitle: '',
@@ -98,9 +98,24 @@ test('model notices keep explicit content even in generic detail mode', () => {
     noticeBody: 'All tests pass.',
   })
   const built = buildPayload(event, config({ notify: { detail: 'generic' } }))
-  assert.equal(built.payload.title, 'DSH · Build finished')
-  assert.equal(built.payload.short, 'All tests pass.')
-  assert.match(built.payload.desp, /All tests pass\./u)
+  assert.equal(built.payload.title, 'DSH · 通知')
+  assert.equal(built.payload.short, 'DSH 通知')
+  assert.doesNotMatch(built.payload.desp, /Build finished|All tests pass/u)
+  assert.match(built.payload.desp, /scopen:\/\/top\.allenyou\.dsh\?/u)
+})
+
+test('model notices in title detail keep the session but omit the body', () => {
+  const event = makeEvent({
+    kind: 'notice',
+    sessionTitle: 'Refactor database',
+    noticeTitle: 'Build finished',
+    noticeBody: 'All tests pass.',
+  })
+  const built = buildPayload(event, config({ notify: { detail: 'title' } }))
+  assert.equal(built.payload.title, 'DSH · 通知')
+  assert.match(built.payload.short, /Refactor database/u)
+  assert.doesNotMatch(built.payload.short, /Build finished|All tests pass/u)
+  assert.doesNotMatch(built.payload.desp, /Build finished|All tests pass/u)
 })
 
 test('model notices without a session use the fallback URL', () => {

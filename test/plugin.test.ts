@@ -90,7 +90,7 @@ function makeContext(): FakeContext {
       admit: () => ({ peer: {} }),
       authenticatedUrl: (base: string) => `${base}?token=test`,
     },
-    sessions: { get: () => undefined },
+    sessions: { get: (id: string) => id === 'session-1' ? { id, header: {} } : undefined },
     get: (name: string) => name === 'tools' ? toolsService : undefined,
     on: (event: string, listener: (...args: unknown[]) => unknown) => {
       listeners.set(event, listener)
@@ -113,6 +113,7 @@ test('apply registers routes, event observers, and the mobile_notify tool', () =
     '/mobile/health',
     '/mobile/presence',
     '/mobile/push/test',
+    '/mobile/session-settings',
     '/mobile/settings',
   ])
   assert.deepEqual([...fake.listeners.keys()].sort(), [
@@ -168,6 +169,23 @@ test('presence and health routes work through the fake connection', async () => 
   assert.equal(payload.pending, 0)
   assert.equal(payload.presence.web, 1)
   assert.doesNotMatch(healthRes.body, /sctp|sendkey|publicBase/u)
+  for (const cleanup of fake.cleanups.reverse()) cleanup()
+})
+
+test('per-session turn-done route updates the current session', async () => {
+  const fake = makeContext()
+  apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
+  const route = fake.routes.get('/mobile/session-settings')
+  assert.ok(route !== undefined)
+  const res = makeResponse()
+  await route.handler(makeRequest('PUT', { sessionId: 'session-1', turnDone: true }), res)
+  assert.equal(res.status, 200)
+  const body = JSON.parse(res.body) as { ok: boolean; sessionId: string; turnDone: boolean }
+  assert.deepEqual(body, { ok: true, sessionId: 'session-1', turnDone: true })
+
+  const missing = makeResponse()
+  await route.handler(makeRequest('PUT', { sessionId: 'session-2', turnDone: true }), missing)
+  assert.equal(missing.status, 404)
   for (const cleanup of fake.cleanups.reverse()) cleanup()
 })
 

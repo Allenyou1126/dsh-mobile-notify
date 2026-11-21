@@ -1,9 +1,11 @@
-/** Model-facing `mobile_notify` tool: explicit, direct notification pushes. */
+/** Model-facing `mobile_notify` tool: queue a notice through the same web-first flow as events. */
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { EffectiveConfig } from '../config.ts'
 import { cleanMultiline, cleanText } from '../shared/text.ts'
 import type { Clock } from './clock.ts'
-import type { Logger, NormalizedEvent, PushResult, Transport } from './types.ts'
+import type { DecisionEngine } from './decision.ts'
+import type { SessionAppendLike, SessionState } from './session-state.ts'
+import type { Logger, NormalizedEvent } from './types.ts'
 
 const TITLE_MAX = 60
 const BODY_MAX = 1000
@@ -16,11 +18,10 @@ export interface ToolsServiceLike {
 
 export interface NotifyToolDeps {
   readonly config: EffectiveConfig
-  readonly transport: Transport
+  readonly engine: DecisionEngine
+  readonly sessionState: SessionState
   readonly logger: Logger
   readonly clock: Clock
-  /** Receive every attempted push so `/mobile/health` can report it. */
-  readonly onPushResult?: (result: PushResult) => void
 }
 
 function toolsOf(ctx: { get: (name: string) => unknown }): ToolsServiceLike | undefined {
@@ -51,12 +52,14 @@ function optionalBody(value: unknown): string | undefined {
   return cleanMultiline(value, BODY_MAX)
 }
 
-/** Use the calling session for the `scopen` link when it is valid; otherwise omit the link. */
-function sessionIdOf(agent: unknown): string {
-  if (typeof agent !== 'object' || agent === null) return ''
-  const session = (agent as { session?: { id?: unknown } }).session
-  const id = session?.id
-  return typeof id === 'string' && SESSION_ID_PATTERN.test(id) ? id : ''
+function callingSession(agent: unknown): SessionAppendLike | undefined {
+  if (typeof agent !== 'object' || agent === null) return undefined
+  const session = (agent as { session?: unknown }).session
+  if (typeof session !== 'object' || session === null) return undefined
+  const candidate = session as { id?: unknown; append?: unknown }
+  if (typeof candidate.id !== 'string' || !SESSION_ID_PATTERN.test(candidate.id)) return undefined
+  if (typeof candidate.append !== 'function') return undefined
+  return candidate as unknown as SessionAppendLike
 }
 
 /** Build one model notification event; shared with tests. */
@@ -64,11 +67,11 @@ export function createNotifyToolDefinition(deps: NotifyToolDeps): ToolDefinition
   return defineTool({
     name: 'mobile_notify',
     description:
-      'Send a notification through the configured mobile-notify transport (Server酱³, or dryRun). '
-      + 'Use it only when the user explicitly asks to be notified, or when the user asked to hear about '
-      + 'a long-running result. This sends immediately and does not use the approval/question web-first '
-      + 'fallback. The title is prefixed with "DSH ·"; body line breaks are preserved. Returns dryRun '
-      + 'when the transport recorded the message without sending it.',
+      'Queue a notification through the same web-first flow as approval/question reminders: the open page '
+      + 'gets the in-page card or browser notification first, and Server酱³ is only a fallback. Use it only '
+      + 'when the user explicitly asks to be notified, or when the user asked to hear about a long-running '
+      + 'result. The title is prefixed with "DSH ·"; body line breaks are preserved. The notice follows the '
+      + 'configured detail/privacy level, debounce/grace timing, presence/ack, and push rate limits.',
     parameters: {
       title: {
         type: 'string',
@@ -88,35 +91,50 @@ export function createNotifyToolDefinition(deps: NotifyToolDeps): ToolDefinition
         additionalProperties: false,
         properties: {
           ok: { type: 'boolean', required: true },
-          dryRun: { type: 'boolean', required: true },
+          queued: { type: 'boolean', required: true },
         },
       },
       render: (args, value) => [{
         type: 'text',
-        text: value.dryRun
-          ? `Notification recorded in dryRun (nothing sent): ${args.title}`
-          : `Notification sent: ${args.title}`,
+        text: value.queued
+          ? `Notification queued through the web-first flow: ${args.title}`
+          : `Notification was not queued: ${args.title}`,
       }],
     },
-    timeoutMs: deps.config.limits.pushTimeoutMs * (deps.config.limits.pushRetries + 1) + 5_000,
     async execute(args, exec) {
       const title = requireTitle(args.title)
       const body = optionalBody(args.body)
+      const session = callingSession(exec.agent)
+      const createdAt = deps.clock.now()
+      const key = `notice-${createdAt}-${Math.random().toString(36).slice(2, 10)}`
       const event: NormalizedEvent = {
-        eventId: `notice:${deps.clock.now()}`,
+        eventId: key,
         kind: 'notice',
-        sessionId: sessionIdOf(exec.agent),
+        sessionId: session?.id ?? '',
+        callId: key,
         sessionTitle: '',
         noticeTitle: title,
         ...(body === undefined ? {} : { noticeBody: body }),
-        createdAt: deps.clock.now(),
+        createdAt,
+        oneShot: true,
       }
-      const result = await deps.transport.send(event, exec.signal)
-      deps.onPushResult?.(result)
-      if (!result.ok) {
-        throw new Error(`mobile_notify failed: ${result.error ?? 'unknown error'}`)
+      if (!deps.engine.begin(event)) {
+        throw new Error('mobile_notify could not start: notification tool is disabled or already pending')
       }
-      return { ok: true, dryRun: result.dryRun }
+      try {
+        if (session !== undefined) {
+          deps.sessionState.appendNotice(session, {
+            key,
+            title,
+            ...(body === undefined ? {} : { body }),
+            createdAt,
+          })
+        }
+      } catch (error) {
+        deps.engine.resolve(event)
+        throw error
+      }
+      return { ok: true, queued: true }
     },
   })
 }

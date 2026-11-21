@@ -2,11 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { resolveConfig } from '../src/config.ts'
+import type { DecisionEngine } from '../src/host/decision.ts'
 import { createNotifyToolDefinition, registerNotifyTool } from '../src/host/tool.ts'
-import type { Logger, NormalizedEvent, PushResult, Transport } from '../src/host/types.ts'
+import type { Logger, NormalizedEvent } from '../src/host/types.ts'
 import { FakeClock, quietLogger } from './helpers.ts'
 
 type Exec = Parameters<ToolDefinition['execute']>[1]
+
+interface Appended {
+  type: string
+  data: unknown
+}
 
 function config(overrides: Record<string, unknown> = {}) {
   return resolveConfig({
@@ -17,76 +23,104 @@ function config(overrides: Record<string, unknown> = {}) {
   })
 }
 
-function makeDefinition(result: PushResult) {
-  const sent: NormalizedEvent[] = []
-  const reported: PushResult[] = []
-  const transport: Transport = {
-    async send(event) {
-      sent.push(event)
-      return result
+function makeDefinition(options: { begin?: boolean; appendError?: Error } = {}) {
+  const began: NormalizedEvent[] = []
+  const resolved: NormalizedEvent[] = []
+  const appended: Appended[] = []
+  const engine = {
+    begin(event: NormalizedEvent) {
+      began.push(event)
+      return options.begin !== false
     },
+    resolve(event: NormalizedEvent) {
+      resolved.push(event)
+    },
+  } as unknown as DecisionEngine
+  const sessionState = {
+    appendNotice: (_session: unknown, notice: unknown) => {
+      if (options.appendError !== undefined) throw options.appendError
+      appended.push({ type: 'notice', data: notice })
+    },
+    clearNotice: () => {},
+    setTurnDone: () => {},
+    turnDoneFor: () => null,
+    status: () => 'ready' as const,
   }
   const definition = createNotifyToolDefinition({
     config: config(),
-    transport,
+    engine,
+    sessionState,
     logger: quietLogger,
     clock: new FakeClock(),
-    onPushResult: value => { reported.push(value) },
   })
-  return { definition, sent, reported }
+  return { definition, began, resolved, appended }
 }
 
-function exec(agent: unknown = { session: { id: 'session-1' } }): Exec {
+function sessionAgent(): unknown {
+  return {
+    session: {
+      id: 'session-1',
+      append: () => {},
+    },
+  }
+}
+
+function exec(agent: unknown): Exec {
   return { agent, signal: new AbortController().signal } as unknown as Exec
 }
 
-function execWith(agent: unknown): Exec {
-  return { agent, signal: new AbortController().signal } as unknown as Exec
-}
-
-test('mobile_notify sends a notice with its title/body and the calling session', async () => {
-  const { definition, sent, reported } = makeDefinition({ ok: true, dryRun: false, status: 200 })
+test('mobile_notify queues a notice through the engine and session projection', async () => {
+  const { definition, began, appended } = makeDefinition()
   assert.equal(definition.name, 'mobile_notify')
   assert.deepEqual(definition.parameters.required, ['title'])
 
-  const result = await definition.execute({ title: 'Build done', body: 'All tests pass.' }, exec())
-  assert.deepEqual(result, { ok: true, dryRun: false })
-  assert.equal(sent.length, 1)
-  assert.equal(sent[0]?.kind, 'notice')
-  assert.equal(sent[0]?.sessionId, 'session-1')
-  assert.equal(sent[0]?.noticeTitle, 'Build done')
-  assert.equal(sent[0]?.noticeBody, 'All tests pass.')
-  assert.deepEqual(reported, [{ ok: true, dryRun: false, status: 200 }])
+  const result = await definition.execute({ title: 'Build done', body: 'All tests pass.' }, exec(sessionAgent()))
+  assert.deepEqual(result, { ok: true, queued: true })
+  assert.equal(began.length, 1)
+  assert.equal(began[0]?.kind, 'notice')
+  assert.equal(began[0]?.sessionId, 'session-1')
+  assert.equal(began[0]?.oneShot, true)
+  assert.equal(began[0]?.noticeTitle, 'Build done')
+  assert.equal(began[0]?.noticeBody, 'All tests pass.')
+  assert.equal(appended.length, 1)
 })
 
-test('mobile_notify without a body defaults to the title', async () => {
-  const { definition, sent } = makeDefinition({ ok: true, dryRun: true })
-  const result = await definition.execute({ title: 'Build done' }, exec())
-  assert.deepEqual(result, { ok: true, dryRun: true })
-  assert.equal(sent[0]?.noticeBody, undefined)
+test('mobile_notify without a body does not append an empty body', async () => {
+  const { definition, began, appended } = makeDefinition()
+  await definition.execute({ title: 'Build done' }, exec(sessionAgent()))
+  assert.equal(began[0]?.noticeBody, undefined)
+  assert.equal(appended[0]?.data !== undefined, true)
+  const data = appended[0]?.data as { body?: string }
+  assert.equal(data.body, undefined)
 })
 
-test('mobile_notify without an owning session omits the deep link session', async () => {
-  const { definition, sent } = makeDefinition({ ok: true, dryRun: true })
-  await definition.execute({ title: 'Build done' }, execWith(undefined))
-  assert.equal(sent[0]?.sessionId, '')
+test('mobile_notify without an owning session still queues without a projection', async () => {
+  const { definition, began, appended } = makeDefinition()
+  await definition.execute({ title: 'Build done' }, exec(undefined))
+  assert.equal(began[0]?.sessionId, '')
+  assert.equal(appended.length, 0)
 })
 
-test('mobile_notify reports upstream failure as a tool error', async () => {
-  const { definition, reported } = makeDefinition({ ok: false, dryRun: false, error: 'rate_limited' })
+test('mobile_notify reports a disabled/duplicate queue as a tool error', async () => {
+  const { definition } = makeDefinition({ begin: false })
   await assert.rejects(
-    definition.execute({ title: 'Build done', body: 'All tests pass.' }, exec()),
-    /mobile_notify failed: rate_limited/u,
+    definition.execute({ title: 'Build done' }, exec(sessionAgent())),
+    /notification tool is disabled or already pending/u,
   )
-  assert.equal(reported[0]?.ok, false)
+})
+
+test('mobile_notify resolves the engine record when projection append fails', async () => {
+  const { definition, resolved } = makeDefinition({ appendError: new Error('append failed') })
+  await assert.rejects(definition.execute({ title: 'Build done' }, exec(sessionAgent())), /append failed/u)
+  assert.equal(resolved.length, 1)
 })
 
 test('mobile_notify rejects empty, overlong, and non-string content', async () => {
-  const { definition } = makeDefinition({ ok: true, dryRun: true })
-  await assert.rejects(definition.execute({ title: '   ' }, exec()), /title must not be empty/u)
-  await assert.rejects(definition.execute({ title: 'a'.repeat(61) }, exec()), /title must be at most 60/u)
-  await assert.rejects(definition.execute({ title: 'ok', body: 'a'.repeat(1001) }, exec()), /body must be at most 1000/u)
-  await assert.rejects(definition.execute({ title: 42 }, exec()), /title/u)
+  const { definition } = makeDefinition()
+  await assert.rejects(definition.execute({ title: '   ' }, exec(sessionAgent())), /title must not be empty/u)
+  await assert.rejects(definition.execute({ title: 'a'.repeat(61) }, exec(sessionAgent())), /title must be at most 60/u)
+  await assert.rejects(definition.execute({ title: 'ok', body: 'a'.repeat(1001) }, exec(sessionAgent())), /body must be at most 1000/u)
+  await assert.rejects(definition.execute({ title: 42 }, exec(sessionAgent())), /title/u)
 })
 
 test('mobile_notify is registered only when enabled and a tools service exists', () => {
@@ -98,33 +132,31 @@ test('mobile_notify is registered only when enabled and a tools service exists',
     },
   }
   const ctx = { get: (name: string) => name === 'tools' ? tools : undefined }
-
-  const registered = registerNotifyTool(ctx, {
+  const deps = {
     config: config(),
-    transport: { send: async () => ({ ok: true, dryRun: true }) },
+    engine: { begin: () => true, resolve: () => {} } as unknown as DecisionEngine,
+    sessionState: {
+      appendNotice: () => {},
+      clearNotice: () => {},
+      setTurnDone: () => {},
+      turnDoneFor: () => null,
+      status: () => 'ready' as const,
+    },
     logger: quietLogger,
     clock: new FakeClock(),
-  })
+  }
+
+  const registered = registerNotifyTool(ctx, deps)
   assert.equal(typeof registered, 'function')
   assert.equal(definitions[0]?.name, 'mobile_notify')
 
-  const disabled = registerNotifyTool(ctx, {
-    config: config({ notify: { modelTool: false } }),
-    transport: { send: async () => ({ ok: true, dryRun: true }) },
-    logger: quietLogger,
-    clock: new FakeClock(),
-  })
+  const disabled = registerNotifyTool(ctx, { ...deps, config: config({ notify: { modelTool: false } }) })
   assert.equal(disabled, undefined)
   assert.equal(definitions.length, 1)
 
   const warnings: unknown[][] = []
   const logger: Logger = { ...quietLogger, warn: (...args: unknown[]) => { warnings.push(args) } }
-  const missing = registerNotifyTool({ get: () => undefined }, {
-    config: config(),
-    transport: { send: async () => ({ ok: true, dryRun: true }) },
-    logger,
-    clock: new FakeClock(),
-  })
+  const missing = registerNotifyTool({ get: () => undefined }, { ...deps, logger })
   assert.equal(missing, undefined)
   assert.equal(warnings.length, 1)
 })

@@ -1,6 +1,6 @@
 # 架构、协议与状态机
 
-> 状态：规格定稿（2026-11-20）；M1 Host 核心 + M2 Client + M2.5 图形配置 + `mobile_notify` 已实现，待真机联调。
+> 状态：规格定稿（2026-11-20）；M1 Host 核心 + M2 Client + M2.5 图形配置 + `mobile_notify` Web-first + 按对话 turnDone 已实现，待真机联调。
 > 接口基线：[plugin-contract.md](../../../dsh-android-shell/.agents/specs/plugin-contract.md) v1；产品取舍：[DECISION.md](../../../DECISION.md)；目标 DSH `0.2.2-rc.5`。
 > 本文里的“契约”指 Shell ↔ 本插件的 v1 契约；本文新增的兼容性扩展集中在 §11。
 
@@ -24,7 +24,7 @@
 │   ├─ 归一化 + debounce + pending store + resolved 清理                       │
 │   ├─ presence 表（web/shell，TTL）+ ack 表                                   │
 │   ├─ 回退决策：Web 未 delivered + 手机不在前台 → Server酱³                    │
-│   ├─ mobile_notify 工具：模型显式请求时直接推送自定义通知                    │
+│   ├─ mobile_notify 工具：模型显式请求时进入与事件相同的 Web-first 决策        │
 │   └─ /mobile/bootstrap、/mobile/config、/mobile/presence、/mobile/ack、      │
 │      /mobile/push/test、/mobile/health                                      │
 └──────────────────────────────────┬──────────────────────────────────────────┘
@@ -80,7 +80,7 @@
 | `approval/request` | waterfall，`prepend: true`，调用 `next()` | `kind=approval`，`sessionId=req.agent.id`，`callId=req.callId?`，`toolName`，`reason=req.reason ?? req.displayReason?.en` | 是（`notify.approval`） |
 | `user-questions/request` | waterfall，`prepend: true`，调用 `next()` | `kind=question`；任一问题 `intent.kind === 'plan-review'` 时 `kind=plan-review`；`sessionId=request.agent?.id`；`callId=request.wait?.callId`；摘要取第一个 `question` | 是（`question` / `planReview`） |
 | `session/event` 的 `turn/end` | emit 监听 | `kind=turn`，`sessionId=session.id`，`turn=event.data.turn`，`reason=event.data.reason.kind` | 否（`turnDone=false`） |
-| `mobile_notify` 工具 | `ctx.tools.register`（模型调用） | `kind=notice`，`sessionId=调用会话`，`noticeTitle`/`noticeBody` | 是（`notify.modelTool=true`）；直接发送，不走 pending/ack |
+| `mobile_notify` 工具 | `ctx.tools.register`（模型调用） | `kind=notice`，`sessionId=调用会话`，`callId=通知 key`，`noticeTitle`/`noticeBody` | 是（`notify.modelTool=true`）；走 `DecisionEngine` 的 pending/ack/web-first 流程 |
 | resolved | `next()` 返回/抛错 | 删除 pending、取消未发推送 | — |
 
 约束：
@@ -303,7 +303,7 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 
 ### 7.1 通用
 
-- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, handler })`。同一 path 只允许注册一次；`/mobile/settings` 的 GET/PUT 在同一个 handler 内按 method 分派。
+- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, handler })`。同一 path 只允许注册一次；`/mobile/settings` 的 GET/PUT 在同一个 handler 内按 method 分派；`/mobile/session-settings` 是独立的 PUT。
 - 响应头：`Cache-Control: no-store`；JSON 接口 `Content-Type: application/json; charset=utf-8`；不设 CORS。
 - 认证（除 bootstrap）：`requestRejection` → `admit`；失败返回 401/403，不读 body 之外的状态。
 - 方法不符：405 + `Allow`。
@@ -418,7 +418,7 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
   {
     "ok": true,
     "contract": 1,
-    "version": "0.2.0",
+    "version": "0.3.0",
     "transport": "dryRun",
     "pending": 1,
     "presence": { "web": 1, "androidShell": 0 },
@@ -437,6 +437,14 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 - 保存顺序：先校验 settings（复用 `resolveConfig`）和 SendKey，再写 credentials，最后 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`；普通字段保存会重启插件。
 - 若 `configEditor`/`fiber.entry` 不存在：GET 仍可读，`editable=false`；PUT 返回 503。credentials 不可用：`sendkey.available=false`，带 key 的写入返回 503。
 - 不暴露 SendKey/uid/profile 路径；错误文案不包含 secret。body ≤16KB，写入限流 20/min/IP。
+
+### 7.9 `PUT /mobile/session-settings`（本仓库扩展）
+
+- 用途：对话粒度覆盖 turn-done；独立于全局 `/mobile/settings`。
+- body：`{ sessionId, turnDone: boolean | null }`；`null` 表示“跟随全局”。
+- 认证/限流同 settings；body ≤4KB，20/min/IP。
+- Host 通过 `ctx.sessions.get(sessionId)` 找到 Session，追加 `plugin:dsh-mobile-notify/turn-done` 插件记录；Session 不存在返回 404。
+- 成功：`200 { ok: true, sessionId, turnDone }`。设置写入 Session 日志并随 projection 广播，不重启插件。
 
 ## 8. Server酱³ 适配器
 
@@ -488,7 +496,7 @@ interface TagConfig {
 - 成功判定：HTTP 2xx 且（若响应 JSON 有 `code`）`code === 0`；否则失败。
 - 超时/网络/5xx/429：最多重试 `pushRetries`（默认 2，总尝试 3），退避 500ms/1500ms；4xx 不重试。
 - 失败：写日志（状态码/错误码/脱敏消息），返回失败；不影响审批。
-- `mobile_notify` 的 `notice` payload 使用 `title = DSH · <noticeTitle>`、`short = noticeBody 或 title`、`desp = escapeMarkdown(noticeBody) + 空行 + 深链`；`detail`/`privacy` 不降级显式正文。
+- `mobile_notify` 的 `notice` payload 和页面提醒一样受 `detail`/`privacy` 约束：`summary` 用标题/正文和会话；`title` 只保留“DSH · 通知”和会话；`generic` 不显示标题正文、会话名或原因。
 
 ### 8.3 TAG 分组（Server酱³）
 
@@ -538,7 +546,7 @@ App 侧建议（插件无法替用户设置）：
 
 - 用 `dsh-approval` / `dsh-question` / `dsh-plan-review` 作为“需要处理”的过滤入口。
 - `turnDone=false` 时不会出现 `dsh-turn`；开启后若不想看完成提醒，可在 App 里过滤该 Tag 或调整阅读偏好。
-- `dsh-notice` 只对应模型显式推送；不想接收可在配置卡关闭 `mobile_notify`，或在 App 内过滤该 Tag。
+- `dsh-notice` 只对应模型显式推送；它同样先尝试 Web 提醒，不想接收可在配置卡关闭 `mobile_notify`，或在 App 内过滤该 Tag。
 - 用 `dsh-test` 验证连通性；Tag 只有在出现含它的消息后才会进入 App 侧栏，所以先发测试推送，再设置过滤/阅读偏好；测完可删除这些消息（没有消息后对应 Tag 会消失）。
 - 多套部署/环境用 namespace 区分（如 `dsh-work`、`dsh-home`）；不要按会话/请求建 Tag。
 - Tag 是**消息级**而非会话级：同一会话的审批、提问、完成消息会进入不同的 Tag 分组。
@@ -575,15 +583,23 @@ scopen://<appPackage>?sessionId=<enc>&kind=<enc>[&requestId=<enc>]&sc.market=0&s
 
 ### 8.6 `mobile_notify` 工具
 
-- 注册：`ctx.tools.register(defineTool(...))`；`apply` 的 `inject` 包含 `tools`。`notify.modelTool=false` 时不注册；注册失败只 warning，不影响审批/提问路径。
+- 注册：`ctx.tools.register(defineTool(...))`；`apply` 的 `inject` 包含 `tools` 和 `sessionProjections`。`notify.modelTool=false` 时不注册；注册失败只 warning，不影响审批/提问路径。
 - 参数：`title`（必填，≤60 字符）、`body`（可选，≤1000 字符，保留换行）。超出长度/空标题/非字符串直接返回工具错误。
-- 事件：`kind=notice`、`sessionId=exec.agent.session.id`（合法时；否则空字符串）、`noticeTitle`、`noticeBody`、`createdAt=clock.now()`。
-- 发送：直接调用 `ServerChanTransport.send`，不经过 `DecisionEngine`，不产生 pending/ack，不等待 Web；受 `pushPerMinute` 和 transport 的超时/重试/SendKey 约束。
-- 结果：成功返回 `{ ok: true, dryRun }`；上游失败抛出 `mobile_notify failed: ...`，由 DSH 转为普通工具错误。`onPushResult` 更新 `health.lastPush.kind='notice'`。
+- 事件：`kind=notice`、`sessionId=exec.agent.session.id`（合法时；否则空字符串）、`callId=通知 key`、`noticeTitle`、`noticeBody`、`createdAt=clock.now()`、`oneShot=true`。
+- 入队：先 `engine.begin(event)`，再向 Session 追加 `plugin:dsh-mobile-notify/notice` 插件记录（可用 `ctx.sessions.get` 找到 Session 时）；记录通过 `mobileNotify` projection 广播给页面，Client 以合成 pending interaction 显示同一个浮动卡/Web Notification，并 ack `kind=notice`。
+- 回退：`DecisionEngine` 在页面存在时等待 ack；无页面或 ack 失败时按 `graceMs` 推送 Server酱³；成功后由 `onNoticeEnd` 追加 `plugin:dsh-mobile-notify/clear` 清理 projection。
+- 结果：工具只返回 `{ ok: true, queued: true }`；真正的送达/回退由决策流程异步完成，`health.lastPush` 记录最终结果。工具参数错误/入队重复直接返回工具错误。
 - 深链：当前会话合法时 `kind=notice`；没有会话时用 `fallbackUrl`；不传任意 URL。
 - 日志：只记录 kind/短 sessionId/Tag/状态码，不记录标题和正文。
 
-### 8.7 dryRun 与测试
+### 8.7 按对话 turnDone
+
+- Session projection `mobileNotify` 同时保存 `turnDone: boolean | null`；`null` 跟随全局 `notify.turnDone`。
+- 对话标题栏 Client 按钮调用 `PUT /mobile/session-settings`，Host 追加 `plugin:dsh-mobile-notify/turn-done` 插件记录；projection 更新后按钮和 `turnDoneFor(session)` 同步。
+- `registerEventObservers` 的 `turnDone` 改为谓词：`sessionState.turnDoneFor(session) ?? config.notify.turnDone`；因此可对单个对话开启/关闭，且不影响其他对话。
+- 设置持久化在 Session 日志；插件重启/对话重开后由 projection 折叠恢复。
+
+### 8.8 dryRun 与测试
 
 - `dryRun`：构造 payload、做与真实发送相同的校验/截断，但不发请求；日志只记录 `kind`、`sessionId` 短前缀、字段是否包含原因/标题、生效的 Tag 列表（仅配置值），不记录完整 `desp`。
 - `/mobile/push/test` 在 `dryRun` 下返回 `202 { ok: true, dryRun: true }`；在 serverchan3 下真发并返回结果。
@@ -854,6 +870,7 @@ interface DshMobileBridge {
 | `transport` | 只有 `serverchan3` | 增加 `dryRun`（默认，仅记录不发网络） | 便于首次安装/联调；生产切回 `serverchan3` |
 | `GET /mobile/config` | 无 | 新增客户端只读配置 | additive；旧 Shell 不调用 |
 | `GET/PUT /mobile/settings` | 无 | 插件页图形配置；SendKey 写 credentials | additive；仅浏览器配置卡使用 |
+| `PUT /mobile/session-settings` | 无 | 对话粒度 turnDone 覆盖；写 Session 插件记录 | additive；仅对话标题栏按钮使用 |
 | 配置卡位置 | 无 | Plugins → 包 → Configuration | DSH 插件页扩展；不改变 Shell 协议 |
 | ack `callId` | 无 | 可选字段 | additive；旧 Host 可忽略；本 Host 优先用于关联 |
 | health 认证 | “loopback 或 DSH Cookie” | 一律 DSH Cookie + Origin | 更严格；不影响 Shell |
@@ -861,7 +878,7 @@ interface DshMobileBridge {
 | turn-done ack | `kind=turn` 已列出，但流程未细化 | Host 已实现 turn 推送；Client 用 running 边沿触发 Web Notification，onshow 成功才 ack 并抑制；失败/未授权走回退；默认关闭 | additive/可选 |
 | `scopen` 的 `kind` | 示例只写 approval/question | 允许 `plan-review`/`turn`/`notice`；Shell 只读白名单 key | 不影响拉起；`kind` 仅信息 |
 | `sc.confirm` | 默认 1 | 不主动设置 | 保持默认；白名单后可免确认 |
-| `mobile_notify` 工具 | 无 | 新增模型主动推送工具；`kind=notice`，直接走 transport | additive；不影响 Shell 协议 |
+| `mobile_notify` 工具 | 无 | 新增模型主动推送工具；`kind=notice`，走与审批/提问相同的 Web-first/presence/ack 流程 | additive；不影响 Shell 协议 |
 | `phoneForeground` 提前抑制 | DECISION 表述为“手机前台即不推” | 仅在 `notify.inPage=true` 且 `inPageCountsAsDelivered=true` 时提前抑制；否则走 ack/grace | 更符合“页内提示已可见/已算 delivered”的前提；默认配置下行为一致 |
 
 如果要把这些扩展写回契约：在 `dsh-android-shell` 仓库更新 `plugin-contract.md`，兼容性字段不升 `contract` 版本；破坏性变更才升版本。本仓库不在未沟通的情况下改 Shell 契约。
@@ -871,7 +888,7 @@ interface DshMobileBridge {
 - 认证/Origin/body/限流见 §7；bootstrap 的部署前提见 §7.2。
 - SendKey 只在 Host；`/mobile/config`、health、日志、通知、异常消息均不含。
 - 深链只带 `sessionId`/`kind`/`requestId`；不带 token/Cookie/任意 URL；Shell 只读白名单 extras（另一仓库）。
-- 通知内容按 `detail`/`privacy` 降级；`generic` 不含会话名/原因/工具名；不发代码/完整参数/审批全文。`mobile_notify` 的标题/正文由模型按用户请求显式提供，只做长度/控制字符/Markdown 清洗。
+- 通知内容按 `detail`/`privacy` 降级；`generic` 不含会话名/原因/工具名；不发代码/完整参数/审批全文。`mobile_notify` 的标题/正文也遵循同一降级规则。
 - Server酱³ Tag 只放配置的稳定分组，不放会话名/原因/sessionId/动态内容；Tag 对第三方可见，且会被 App 长期聚合。
 - 锁屏可见性由 Server酱³ App 控制；DSH 侧无法强制隐藏；敏感场景用 `generic`。
 - 日志不写请求体、Cookie、SendKey、完整 sessionId；只写短前缀/kind/delivered/状态码。

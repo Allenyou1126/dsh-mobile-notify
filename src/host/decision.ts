@@ -29,6 +29,7 @@ interface PendingRecord {
   graceTimer?: TimerHandle
   pushAbort?: AbortController
   pushResult?: PushResult
+  ended?: boolean
 }
 
 export interface DecisionDeps {
@@ -38,6 +39,8 @@ export interface DecisionDeps {
   readonly transport: Transport
   readonly logger: Logger
   readonly onPushResult?: (event: NormalizedEvent, result: PushResult) => void
+  /** A notice reached a final state; used to clear its Session projection. */
+  readonly onNoticeEnd?: (event: NormalizedEvent, outcome: 'suppressed' | 'pushed' | 'failed') => void
 }
 
 /** Stable correlation key for one pending event. */
@@ -55,7 +58,7 @@ function isEnabled(config: EffectiveConfig, kind: NormalizedEvent['kind']): bool
     case 'question': return config.notify.question
     case 'plan-review': return config.notify.planReview
     case 'turn': return config.notify.turnDone
-    case 'notice': return false
+    case 'notice': return config.notify.modelTool
     case 'test': return false
   }
 }
@@ -235,8 +238,19 @@ export class DecisionEngine {
     record.state = 'suppressed'
     record.pushAbort?.abort()
     record.pushAbort = undefined
+    this.endNotice(record, 'suppressed')
     this.deps.logger.debug(`dsh-mobile-notify: suppressed ${shortId(record.event.sessionId)}:${record.event.kind}`)
     if (record.event.oneShot) this.delete(record.baseKey)
+  }
+
+  private endNotice(record: PendingRecord, outcome: 'suppressed' | 'pushed' | 'failed'): void {
+    if (record.event.kind !== 'notice' || record.ended === true) return
+    record.ended = true
+    try {
+      this.deps.onNoticeEnd?.(record.event, outcome)
+    } catch (error) {
+      this.deps.logger.warn('dsh-mobile-notify: notice end callback failed', error)
+    }
   }
 
   private push(record: PendingRecord): void {
@@ -262,6 +276,7 @@ export class DecisionEngine {
         } catch (error) {
           this.deps.logger.warn('dsh-mobile-notify: push result callback failed', error)
         }
+        this.endNotice(record, result.ok ? 'pushed' : 'failed')
         if (!result.ok) {
           this.deps.logger.warn(
             `dsh-mobile-notify: push failed for ${shortId(record.event.sessionId)}: ${result.error ?? 'unknown'}`,
@@ -274,6 +289,7 @@ export class DecisionEngine {
         record.pushAbort = undefined
         record.state = 'pushed'
         record.pushResult = { ok: false, dryRun: false, error: 'exception' }
+        this.endNotice(record, 'failed')
         this.deps.logger.warn('dsh-mobile-notify: push threw', error)
         if (record.event.oneShot) this.delete(record.baseKey)
       })

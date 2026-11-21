@@ -67,6 +67,7 @@ export function kindTitle(kind: PendingItem['kind'], t: Translate): string {
     case 'question': return t('banner.question')
     case 'plan-review': return t('banner.planReview')
     case 'turn': return t('banner.turn')
+    case 'notice': return t('banner.notice')
   }
 }
 
@@ -75,6 +76,14 @@ export function summarizePending(item: PendingItem, config: ClientConfig, t: Tra
   if (config.detail === 'generic') return t('banner.generic')
   const parts: string[] = []
   if (config.includeSessionTitle && item.label !== '') parts.push(item.label)
+  if (item.kind === 'notice') {
+    if (config.detail === 'summary' && config.includeReason) {
+      const text = cleanText(item.noticeBody ?? item.noticeTitle, 100)
+      if (text !== undefined) parts.push(text)
+    }
+    if (parts.length === 0) parts.push(kindTitle(item.kind, t))
+    return parts.join(' · ')
+  }
   if (config.detail === 'summary') {
     if (config.includeToolName) {
       const tool = cleanText(item.toolName, 60)

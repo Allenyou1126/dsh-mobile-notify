@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseAck, parsePresence } from '../src/host/routes.ts'
+import { parseAck, parsePresence, parseSessionTurnDone } from '../src/host/routes.ts'
 
 const validPresence = {
   contract: 1,
@@ -64,6 +64,9 @@ test('parseAck accepts delivered and failed acknowledgements', () => {
     reason: 'permission-denied',
   })
   assert.equal(failed.ok, true)
+  const notice = parseAck({ ...validAck, kind: 'notice', key: 'notice-1', callId: 'notice-1' })
+  assert.equal(notice.ok, true)
+  if (notice.ok) assert.equal(notice.value.kind, 'notice')
 })
 
 test('parseAck rejects inconsistent delivery flags and invalid fields', () => {
@@ -76,4 +79,19 @@ test('parseAck rejects inconsistent delivery flags and invalid fields', () => {
   assert.equal(parseAck({ ...validAck, key: 'x'.repeat(257) }).ok, false)
   assert.equal(parseAck({ ...validAck, sessionId: 'bad id' }).ok, false)
   assert.equal(parseAck({ ...validAck, callId: '' }).ok, false)
+})
+
+test('parseSessionTurnDone accepts boolean and null overrides', () => {
+  const on = parseSessionTurnDone({ sessionId: 'session-1', turnDone: true })
+  assert.equal(on.ok, true)
+  if (on.ok) assert.equal(on.value.turnDone, true)
+  const off = parseSessionTurnDone({ sessionId: 'session-1', turnDone: false })
+  assert.equal(off.ok, true)
+  if (off.ok) assert.equal(off.value.turnDone, false)
+  const follow = parseSessionTurnDone({ sessionId: 'session-1', turnDone: null })
+  assert.equal(follow.ok, true)
+  if (follow.ok) assert.equal(follow.value.turnDone, null)
+  assert.equal(parseSessionTurnDone({ sessionId: 'bad id', turnDone: true }).ok, false)
+  assert.equal(parseSessionTurnDone({ sessionId: 'session-1', turnDone: 'yes' }).ok, false)
+  assert.equal(parseSessionTurnDone(null).ok, false)
 })

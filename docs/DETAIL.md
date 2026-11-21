@@ -6,7 +6,8 @@
 - **手机回退**：只有 Web 未成功提醒、且 Android Shell 不在前台时，才通过 Server酱³ App 推送。
 - **深链**：Server酱³ 消息里的 `scopen://top.allenyou.dsh?...` 可由 Android 薄壳拉起并回到对应会话。
 - **TAG 分组**：默认 `dsh` + `dsh-approval` / `dsh-question` / `dsh-plan-review` / `dsh-turn` / `dsh-test` / `dsh-notice`，可在 Server酱³ App 内过滤。
-- **模型主动推送**：`mobile_notify` 工具允许模型在用户明确要求时，直接推送一条自定义标题/正文通知；可在配置卡关闭。
+- **模型主动推送**：`mobile_notify` 工具允许模型在用户明确要求时推送一条自定义标题/正文通知；与审批/提问走同一套 Web-first、presence/ack、detail/privacy 和限流流程。
+- **按对话 turnDone**：对话标题栏的 🔔 按钮可单独开启/关闭该对话的 turn-done 通知；设置写入 Session 日志。
 
 ## 安装
 
@@ -30,15 +31,24 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 ## 模型主动推送
 
-`mobile_notify` 接收 `title`（必填，最多 60 字符）和 `body`（可选，最多 1000 字符，保留换行）。它直接使用当前推送通道，不等待 Web ack，也不参与审批/提问的 Web-first 回退。
+`mobile_notify` 接收 `title`（必填，最多 60 字符）和 `body`（可选，最多 1000 字符，保留换行），把通知排入与审批/提问相同的 `DecisionEngine`，工具只返回 `queued: true`。
 
-- 标题显示为 `DSH · <title>`；正文由模型提供，不受 `detail` 降级影响。
+- 页面存在时先显示浮动卡/Web Notification 并等待 ack；页面不存在或 ack 失败时才回退 Server酱³。
+- 遵循 `detail`/`privacy`：`summary` 显示标题/正文和会话；`title` 仅显示“DSH · 通知”和会话；`generic` 不显示标题正文、会话名或原因。
+- 遵循去抖、等待 ack、presence、`inPageCountsAsDelivered`、浏览器通知开关和推送限流。
 - 默认 TAG 为 `dsh|dsh-notice`，可在“逐项覆盖事件 Tag”中改 `notice`。
 - 当前会话有效时附 `scopen://...&kind=notice`；否则使用配置的网页地址。
-- 失败以工具错误返回；`dryRun` 只记录并返回 `dryRun: true`。
 - 在 **Configuration → 提醒行为** 关闭“允许模型主动推送”后，模型不再看到该工具。
 
 该工具用于“跑完通知我”这类明确请求；不要用它复述普通回复或替代审批/提问提醒。
+
+## 按对话开关 turnDone
+
+对话标题栏右侧的 **🔔 完成通知** 按钮只影响当前对话的 turn-done：
+
+- 点击切换开/关；未设置过的对话跟随全局 `notify.turnDone`。
+- 开关写入该 Session 的插件记录，重启/重开对话后仍保留。
+- 不影响审批/提问、`mobile_notify`，也不影响其他对话。
 
 ## TAG 用法
 

@@ -47,6 +47,8 @@ export interface RoutesDeps {
   health: { lastPush?: LastPush }
   settings: SettingsService
   sendTest: (signal: AbortSignal) => Promise<PushResult>
+  setSessionTurnDone: (sessionId: string, turnDone: boolean | null) => boolean | Promise<boolean>
+  projectionStatus: () => string
 }
 
 interface ParseOk<T> { ok: true; value: T }
@@ -55,7 +57,7 @@ type ParseResult<T> = ParseOk<T> | ParseFail
 
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
-const KINDS = ['approval', 'question', 'plan-review', 'turn'] as const
+const KINDS = ['approval', 'question', 'plan-review', 'turn', 'notice'] as const
 const VIA = ['in-page', 'web-notification', 'none'] as const
 const REASONS = ['none', 'permission-denied', 'unsupported', 'constructor-error', 'hidden-no-notification'] as const
 const PLATFORMS = ['web', 'android-shell'] as const
@@ -137,6 +139,20 @@ export function parsePresence(value: unknown): ParseResult<PresenceInput> {
       ...(activeSessionId === undefined ? {} : { activeSessionId }),
     },
   }
+}
+
+/** Validate a `PUT /mobile/session-settings` body. */
+export function parseSessionTurnDone(value: unknown): ParseResult<{ sessionId: string; turnDone: boolean | null }> {
+  if (!isRecord(value)) return { ok: false, message: 'body must be a JSON object' }
+  const sessionId = readString(value, 'sessionId')
+  if (sessionId === undefined || !SESSION_ID_PATTERN.test(sessionId)) {
+    return { ok: false, message: 'sessionId is invalid' }
+  }
+  const turnDone = value.turnDone
+  if (turnDone !== true && turnDone !== false && turnDone !== null) {
+    return { ok: false, message: 'turnDone must be boolean or null' }
+  }
+  return { ok: true, value: { sessionId, turnDone } }
 }
 
 /** Validate a `POST /mobile/ack` body. */
@@ -343,6 +359,7 @@ function health(config: EffectiveConfig, deps: RoutesDeps): unknown {
     transport: config.transport,
     pending: deps.engine.pendingCount,
     presence: mapPresence(deps.presence.counts()),
+    projection: deps.projectionStatus(),
     lastPush: deps.health.lastPush ?? null,
   }
 }
@@ -475,6 +492,31 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
     sendJson(res, 200, health(deps.config, deps))
   })
 
+  register('PUT', '/mobile/session-settings', async (req, res) => {
+    if (!authorize(req, res, context.connection)) return
+    if (!settingsLimiter.take(ipKey(req), 20, 60_000)) {
+      sendRateLimited(res)
+      req.resume()
+      return
+    }
+    const body = await readJson(req, res, 4096)
+    if (!body.ok) {
+      if (!res.writableEnded) sendError(res, 400, 'invalid_request', body.message)
+      return
+    }
+    const parsed = parseSessionTurnDone(body.value)
+    if (!parsed.ok) {
+      sendError(res, 400, 'invalid_request', parsed.message)
+      return
+    }
+    const changed = await deps.setSessionTurnDone(parsed.value.sessionId, parsed.value.turnDone)
+    if (!changed) {
+      sendError(res, 404, 'session_not_found')
+      return
+    }
+    sendJson(res, 200, { ok: true, sessionId: parsed.value.sessionId, turnDone: parsed.value.turnDone })
+  })
+
   register('GET', '/mobile/settings', async (req, res) => {
     if (!authorize(req, res, context.connection)) return
     const view = await deps.settings.read()
@@ -536,6 +578,7 @@ export const __test = {
   ipKey,
   clientConfig,
   health,
+  parseSessionTurnDone,
   jsonContentType,
   headerValue,
 }

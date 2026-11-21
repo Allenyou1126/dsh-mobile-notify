@@ -9,10 +9,11 @@ import { SettingsService, configEditorOf } from './host/settings.ts'
 import { registerRoutes, type RouteConnection, type RouteWebServer } from './host/routes.ts'
 import { ServerChanTransport } from './host/serverchan3.ts'
 import { registerNotifyTool } from './host/tool.ts'
+import { createSessionState, type SessionAppendLike } from './host/session-state.ts'
 import type { LastPush, Logger } from './host/types.ts'
 
 export const name = 'dsh-mobile-notify'
-export const inject = ['webServer', 'connection', 'sessions', 'tools']
+export const inject = ['webServer', 'connection', 'sessions', 'sessionProjections', 'tools']
 
 export { Config }
 
@@ -49,6 +50,7 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
     clock,
     sendkey: () => readSendkey(credentials),
   })
+  const sessionState = createSessionState(ctx, ctx.logger)
   const engine = new DecisionEngine({
     config,
     clock,
@@ -62,22 +64,23 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
         kind: event.kind,
       }
     },
+    onNoticeEnd: event => {
+      const session = ctx.sessions.get(event.sessionId)
+      if (session === undefined) return
+      sessionState.clearNotice(session as SessionAppendLike, event.callId ?? event.eventId)
+    },
   })
 
-  registerEventObservers(ctx, engine, { turnDone: config.notify.turnDone })
+  registerEventObservers(ctx, engine, {
+    turnDone: session => sessionState.turnDoneFor(session) ?? config.notify.turnDone,
+  })
 
   registerNotifyTool(ctx, {
     config,
-    transport,
+    engine,
+    sessionState,
     logger: ctx.logger,
     clock,
-    onPushResult: result => {
-      health.lastPush = {
-        at: new Date().toISOString(),
-        ok: result.ok,
-        kind: 'notice',
-      }
-    },
   })
 
   ctx.effect(
@@ -89,10 +92,17 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
         engine,
         logger: ctx.logger,
         clock,
-        version: '0.2.0',
+        version: '0.3.0',
         health,
         settings,
         sendTest: signal => transport.sendTest(signal),
+        projectionStatus: () => sessionState.status(),
+        setSessionTurnDone: (sessionId, turnDone) => {
+          const session = ctx.sessions.get(sessionId)
+          if (session === undefined) return false
+          sessionState.setTurnDone(session as SessionAppendLike, turnDone)
+          return true
+        },
       },
     ),
     'dsh-mobile-notify: routes',

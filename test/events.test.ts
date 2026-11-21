@@ -45,7 +45,7 @@ type Waterfall = (req: unknown, next: () => Promise<unknown>) => Promise<unknown
 test('approval observer calls next, begins once, and resolves after the waterfall', async () => {
   const { ctx, listeners } = makeEventContext()
   const { engine, began, resolved } = makeEngine()
-  registerEventObservers(ctx, engine, { turnDone: false })
+  registerEventObservers(ctx, engine, { turnDone: () => false })
   const listener = listeners.get('approval/request') as unknown as Waterfall
   let nextCalls = 0
   const result = await listener({
@@ -68,7 +68,7 @@ test('approval observer calls next, begins once, and resolves after the waterfal
 test('a duplicate event does not resolve the existing record', async () => {
   const { ctx, listeners } = makeEventContext()
   const { engine, resolved } = makeEngine(false)
-  registerEventObservers(ctx, engine, { turnDone: false })
+  registerEventObservers(ctx, engine, { turnDone: () => false })
   const listener = listeners.get('approval/request') as unknown as Waterfall
   const result = await listener({ agent: { id: 'session-1' } }, async () => 'allowed-once')
   assert.equal(result, 'allowed-once')
@@ -78,7 +78,7 @@ test('a duplicate event does not resolve the existing record', async () => {
 test('question observer classifies plan-review and skips sessionless requests', async () => {
   const { ctx, listeners } = makeEventContext()
   const { engine, began } = makeEngine()
-  registerEventObservers(ctx, engine, { turnDone: false })
+  registerEventObservers(ctx, engine, { turnDone: () => false })
   const listener = listeners.get('user-questions/request') as unknown as Waterfall
 
   await listener({
@@ -97,14 +97,14 @@ test('question observer classifies plan-review and skips sessionless requests', 
 test('turnDone controls the turn observer and subagents are skipped', () => {
   const normal = makeEventContext()
   const disabled = makeEngine()
-  registerEventObservers(normal.ctx, disabled.engine, { turnDone: false })
+  registerEventObservers(normal.ctx, disabled.engine, { turnDone: () => false })
   const disabledListener = normal.listeners.get('session/event') as unknown as (session: unknown, event: unknown) => void
   disabledListener({ id: 'session-1', header: {} }, { type: 'turn/end', data: { turn: 1 } })
   assert.deepEqual(disabled.began, [])
 
   const enabled = makeEventContext()
   const turnEngine = makeEngine()
-  registerEventObservers(enabled.ctx, turnEngine.engine, { turnDone: true })
+  registerEventObservers(enabled.ctx, turnEngine.engine, { turnDone: () => true })
   const enabledListener = enabled.listeners.get('session/event') as unknown as (session: unknown, event: unknown) => void
   enabledListener({ id: 'session-1', header: {} }, { type: 'turn/end', data: { turn: 2 } })
   assert.equal(turnEngine.began.length, 1)
@@ -113,7 +113,7 @@ test('turnDone controls the turn observer and subagents are skipped', () => {
 
   const subagent = makeEventContext({ subagent: true })
   const subagentEngine = makeEngine()
-  registerEventObservers(subagent.ctx, subagentEngine.engine, { turnDone: true })
+  registerEventObservers(subagent.ctx, subagentEngine.engine, { turnDone: () => true })
   const subagentListener = subagent.listeners.get('session/event') as unknown as (session: unknown, event: unknown) => void
   subagentListener({ id: 'session-1', header: { origin: 'subagent' } }, { type: 'turn/end', data: { turn: 3 } })
   assert.deepEqual(subagentEngine.began, [])

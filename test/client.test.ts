@@ -155,6 +155,27 @@ test('summary and notification title respect detail and privacy', () => {
   assert.equal(notificationTitle(item(), t, config({ includeSessionTitle: false })), 'banner.approval')
 })
 
+test('model notices use their title/body and the configured detail/privacy level', () => {
+  const notice = item({
+    kind: 'notice',
+    rawKind: 'notice',
+    waitKey: 'notice-1',
+    callId: 'notice-1',
+    noticeTitle: 'Build finished',
+    noticeBody: 'All tests pass.',
+    toolName: undefined,
+    reason: undefined,
+  })
+  assert.equal(kindTitle('notice', t), 'banner.notice')
+  assert.match(summarizePending(notice, config(), t), /Refactor database · All tests pass\./u)
+  assert.equal(summarizePending(notice, config({ detail: 'generic' }), t), 'banner.generic')
+  assert.equal(summarizePending(notice, config({ detail: 'title' }), t), 'Refactor database')
+  assert.equal(summarizePending(notice, config({ includeReason: false }), t), 'Refactor database')
+  const ack = buildAckPayload(notice, 'client-1', 'web', true, 'in-page', 'none', new Date(0))
+  assert.equal(ack.kind, 'notice')
+  assert.equal(ack.callId, 'notice-1')
+})
+
 test('parseClientConfig validates fields and falls back safely', () => {
   const parsed = parseClientConfig({
     client: {

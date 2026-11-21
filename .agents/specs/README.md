@@ -11,7 +11,8 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 - 用 presence/ack 判断“Web 是否真的提醒到人”，只在 **Web 未成功提醒且手机 App 不在前台**时，调用 **Server酱³ App** 推送；
 - 推送正文带 `scopen://top.allenyou.dsh?...`，由 Android 薄壳接收并回到对应会话；Server酱³ 消息带低基数 TAG（`dsh` / `dsh-<kind>`），便于 App 内过滤；
 - 提供 `window.__dshMobile.openSession/setForeground` JS 桥、插件页 Configuration 配置卡、测试推送和健康检查；
-- 提供 `mobile_notify` 工具，让模型在用户明确要求时主动推送一条自定义通知（`dsh-notice` TAG，可在配置卡关闭）。
+- 提供 `mobile_notify` 工具，让模型在用户明确要求时主动推送一条自定义通知；它走与审批/提问相同的 Web-first/ack 流程（`dsh-notice` TAG，可在配置卡关闭）。
+- 支持对话粒度的 turn-done 开关（标题栏 🔔，设置写入 Session 日志）。
 
 ## 本仓库不是什么
 
@@ -59,7 +60,7 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 
 ## 状态
 
-- 2026-11-21：M1/M2/M2.5 已实现并安装到目标 profile；`mobile_notify` 已实现，尚未安装到目标 profile；85 项单测与构建通过。配置卡位于 **Plugins → 移动通知 → Configuration**，普通配置经 `configEditor`、SendKey 经 `credentials` 保存；隔离 profile 中已验证图形保存、写入/清除 SendKey 且响应不含 key。
+- 2026-11-21：M1/M2/M2.5 已实现并安装到目标 profile；`mobile_notify` Web-first 与按对话 turnDone 已实现，尚未安装到目标 profile；95 项单测与构建通过。配置卡位于 **Plugins → 移动通知 → Configuration**，普通配置经 `configEditor`、SendKey 经 `credentials` 保存；隔离 profile 中已验证图形保存、写入/清除 SendKey 且响应不含 key。
 - 已从目标 profile 移除 `dsh-web-ui-notify`；主实例已重启，配置卡与浮动提醒卡可用。
 - 本目录的“验收”仍是目标，不是已通过的结果；M3 真机（Server酱³/MiPush/`scopen`）按 [goals.md](goals.md) §7 逐条验证。
 - 不要把“代码能构建”当成功能完成；Server酱³/MiPush/`scopen` 必须真机验证。

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DecisionEngine } from '../src/host/decision.ts'
 import { PresenceStore } from '../src/host/presence.ts'
-import type { PresenceInput } from '../src/host/types.ts'
+import type { NormalizedEvent, PresenceInput } from '../src/host/types.ts'
 import { FakeClock, RecordingTransport, makeAck, makeConfig, makeEvent, quietLogger } from './helpers.ts'
 
 function presence(overrides: Partial<PresenceInput> = {}): PresenceInput {
@@ -17,7 +17,10 @@ function presence(overrides: Partial<PresenceInput> = {}): PresenceInput {
   }
 }
 
-function harness(overrides: Parameters<typeof makeConfig>[0] = {}) {
+function harness(
+  overrides: Parameters<typeof makeConfig>[0] = {},
+  onNoticeEnd?: (event: NormalizedEvent, outcome: 'suppressed' | 'pushed' | 'failed') => void,
+) {
   const clock = new FakeClock()
   const config = makeConfig(overrides)
   const presenceStore = new PresenceStore(clock)
@@ -28,6 +31,7 @@ function harness(overrides: Parameters<typeof makeConfig>[0] = {}) {
     presence: presenceStore,
     transport,
     logger: quietLogger,
+    ...(onNoticeEnd === undefined ? {} : { onNoticeEnd }),
   })
   return { clock, config, presenceStore, transport, engine }
 }
@@ -213,6 +217,39 @@ test('one-shot turn events are removed after delivery', async () => {
   await flush()
   assert.equal(transport.sent.length, 1)
   assert.equal(engine.pendingCount, 0)
+  engine.dispose()
+})
+
+test('model notices use the web-first ack flow and clear when delivered', async () => {
+  const ends: string[] = []
+  const { clock, presenceStore, engine, transport } = harness({}, (event, outcome) => {
+    ends.push(`${event.kind}:${outcome}`)
+  })
+  presenceStore.update(presence())
+  engine.begin(makeEvent({ kind: 'notice', callId: 'notice-1', oneShot: true, noticeTitle: 'Build done' }))
+  clock.advance(1500)
+  await flush()
+  assert.equal(transport.sent.length, 0)
+  engine.onAck(makeAck({ kind: 'notice', key: 'notice-1', callId: 'notice-1', via: 'in-page' }))
+  clock.advance(4000)
+  await flush()
+  assert.equal(transport.sent.length, 0)
+  assert.equal(engine.pendingCount, 0)
+  assert.deepEqual(ends, ['notice:suppressed'])
+  engine.dispose()
+})
+
+test('model notices fall back to Server酱 and clear without a web ack', async () => {
+  const ends: string[] = []
+  const { clock, engine, transport } = harness({}, (event, outcome) => {
+    ends.push(`${event.kind}:${outcome}`)
+  })
+  engine.begin(makeEvent({ kind: 'notice', callId: 'notice-2', oneShot: true, noticeTitle: 'Build done' }))
+  clock.advance(1500)
+  await flush()
+  assert.equal(transport.sent.length, 1)
+  assert.equal(engine.pendingCount, 0)
+  assert.deepEqual(ends, ['notice:pushed'])
   engine.dispose()
 })
 

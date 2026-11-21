@@ -34,14 +34,15 @@ export interface ServerChanTransportDeps {
   readonly limiter?: RateLimiter
 }
 
-function noticeTitle(event: NormalizedEvent): string {
+function noticeTitle(event: NormalizedEvent, detail: DetailLevel): string {
+  if (detail !== 'summary') return 'DSH · 通知'
   const title = cleanOrEmpty(event.noticeTitle, 60)
   const base = title === '' ? '通知' : title
   return base.startsWith('DSH') ? base : `DSH · ${base}`
 }
 
 function titleFor(event: NormalizedEvent, detail: DetailLevel): string {
-  if (event.kind === 'notice') return noticeTitle(event)
+  if (event.kind === 'notice') return noticeTitle(event, detail)
   const kind = event.kind
   if (detail === 'generic') {
     return kind === 'turn' ? 'DSH · 任务完成' : kind === 'test' ? 'DSH · 测试通知' : 'DSH · 有待处理提醒'
@@ -82,11 +83,17 @@ function cleanOrEmpty(value: string | undefined, max: number): string {
 }
 
 function buildShort(event: NormalizedEvent, config: EffectiveConfig): string {
-  if (event.kind === 'notice') {
-    const body = cleanOrEmpty(event.noticeBody, 100)
-    return body === '' ? noticeTitle(event) : body
-  }
   const detail = detailFor(config)
+  if (event.kind === 'notice') {
+    if (detail === 'generic') return genericShort('notice')
+    const parts: string[] = []
+    if (includeSession(event, config)) parts.push(event.sessionTitle)
+    if (detail === 'summary' && config.privacy.includeReason) {
+      const body = cleanOrEmpty(event.noticeBody ?? event.noticeTitle, 100)
+      if (body !== '') parts.push(body)
+    }
+    return parts.length === 0 ? genericShort('notice') : truncate(parts.join(' · '), 100)
+  }
   if (detail === 'generic' || event.kind === 'test') return genericShort(event.kind)
   const parts: string[] = []
   if (includeSession(event, config)) parts.push(event.sessionTitle)
@@ -131,8 +138,23 @@ function buildDesp(event: NormalizedEvent, config: EffectiveConfig): string {
     return `这是一条来自 DeepSeek Harness 的测试推送。\n\n${linkLine(event, config)}`
   }
   if (event.kind === 'notice') {
-    const body = cleanMultiline(event.noticeBody, 1000)
-    const lines = body === undefined ? [] : [escapeMarkdown(body), '']
+    const detail = detailFor(config)
+    const lines: string[] = []
+    if (detail !== 'generic' && includeSession(event, config)) {
+      lines.push(`**会话**：${escapeMarkdown(cleanOrEmpty(event.sessionTitle, 80))}`)
+      lines.push('')
+    }
+    if (detail === 'summary' && config.privacy.includeReason) {
+      const body = cleanMultiline(event.noticeBody ?? event.noticeTitle, 1000)
+      if (body !== undefined) {
+        lines.push(escapeMarkdown(body))
+        lines.push('')
+      }
+    }
+    if (lines.length === 0) {
+      lines.push(genericShort('notice'))
+      lines.push('')
+    }
     lines.push(linkLine(event, config))
     return lines.join('\n')
   }

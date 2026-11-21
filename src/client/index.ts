@@ -12,7 +12,7 @@ import {
 } from './delivery.ts'
 import { dictionaries, NS, type Translate } from './locale.ts'
 import { parseClientConfig } from './config.ts'
-import { postJson, requestJson } from './http.ts'
+import { postJson, putJson, requestJson } from './http.ts'
 import { TurnTracker } from './turn.ts'
 import {
   buildPresencePayload,
@@ -21,6 +21,7 @@ import {
   type PresenceEnvironment,
 } from './presence.ts'
 import { BannerStore, type BannerItem } from './store.ts'
+import { SessionTurnToggle } from './SessionTurnToggle.tsx'
 import type {
   ClientConfig,
   ClientContext,
@@ -111,6 +112,7 @@ function normalizeKind(raw: string): PendingItem['kind'] | undefined {
   if (raw === 'question') return 'question'
   if (raw === 'plan-review') return 'plan-review'
   if (raw === 'turn') return 'turn'
+  if (raw === 'notice') return 'notice'
   return undefined
 }
 
@@ -134,6 +136,9 @@ function normalizePending(
     ...(cleanText(wait.toolName, 60) === undefined ? {} : { toolName: cleanText(wait.toolName, 60) }),
     ...(cleanText(wait.reason, 200) === undefined ? {} : { reason: cleanText(wait.reason, 200) }),
     ...(cleanText(firstQuestion, 200) === undefined ? {} : { question: cleanText(firstQuestion, 200) }),
+    ...(cleanText(wait.noticeTitle, 80) === undefined ? {} : { noticeTitle: cleanText(wait.noticeTitle, 80) }),
+    ...(cleanText(wait.noticeBody, 1000) === undefined ? {} : { noticeBody: cleanText(wait.noticeBody, 1000) }),
+    ...(typeof wait.createdAt === 'number' ? { createdAt: wait.createdAt } : {}),
   }
 }
 
@@ -163,10 +168,60 @@ export function apply(ctx: ClientContext): void {
   let bridgeInstalled = false
   let bridgeObject: DshMobileBridge | undefined
   let previousBridge: DshMobileBridge | undefined
+  const publishedNotices = new Map<string, { key: string; dispose: () => void }>()
+  const publishNotice = ctx.uiSession.registerPendingInteraction?.(() => 0)
 
   if (shell?.contract !== undefined && shell.contract > 1) {
     // Forward-compatible: the v1 fields we use are still additive.
     console.debug(`dsh-mobile-notify: shell contract ${shell.contract} > 1; using v1 behavior`)
+  }
+
+  function syncNotices(): void {
+    if (publishNotice === undefined) return
+    try {
+      const snapshot = ctx.sessions.list.getSnapshot()
+      const seen = new Set<string>()
+      for (const sessionId of snapshot.ids) {
+        const projected = snapshot.projectionsBySession?.[sessionId]?.values?.['mobileNotify']
+        if (typeof projected !== 'object' || projected === null) continue
+        const state = projected as { notice?: unknown }
+        if (typeof state.notice !== 'object' || state.notice === null) continue
+        const notice = state.notice as {
+          key?: unknown
+          title?: unknown
+          body?: unknown
+          createdAt?: unknown
+        }
+        if (typeof notice.key !== 'string' || notice.key === '') continue
+        if (typeof notice.title !== 'string' || notice.title === '') continue
+        const createdAt = typeof notice.createdAt === 'number' ? notice.createdAt : Date.now()
+        seen.add(sessionId)
+        const current = publishedNotices.get(sessionId)
+        if (current?.key === notice.key) continue
+        current?.dispose()
+        try {
+          const dispose = publishNotice({
+            key: notice.key,
+            kind: 'notice',
+            sessionId,
+            callId: notice.key,
+            noticeTitle: notice.title,
+            ...(typeof notice.body === 'string' && notice.body !== '' ? { noticeBody: notice.body } : {}),
+            createdAt,
+          }, async () => {})
+          publishedNotices.set(sessionId, { key: notice.key, dispose })
+        } catch (error) {
+          console.debug('dsh-mobile-notify: notice publication failed', error)
+        }
+      }
+      for (const [sessionId, record] of publishedNotices) {
+        if (seen.has(sessionId)) continue
+        record.dispose()
+        publishedNotices.delete(sessionId)
+      }
+    } catch (error) {
+      console.debug('dsh-mobile-notify: notice projection scan failed', error)
+    }
   }
 
   function currentEnvironment(): PresenceEnvironment {
@@ -340,7 +395,9 @@ export function apply(ctx: ClientContext): void {
       focused: environment.focused,
       bannerAvailable,
       notification: environment.notification,
-      viewingSession: currentSessionId() === record.item.sessionId,
+      viewingSession: record.item.kind === 'notice'
+        ? false
+        : currentSessionId() === record.item.sessionId,
     }, config)
     record.notified = true
     record.mode = decision.mode
@@ -534,6 +591,18 @@ export function apply(ctx: ClientContext): void {
     return true
   }
 
+  function toggleTurnDone(sessionId: string, next: boolean): void {
+    void (async () => {
+      try {
+        const response = await putJson('/mobile/session-settings', { sessionId, turnDone: next }, 5000)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      } catch (error) {
+        console.debug('dsh-mobile-notify: per-session turn toggle failed', error)
+        bannerStore.showNotice(t('header.turnFailed'))
+      }
+    })()
+  }
+
   function sendTest(): Promise<TestResult> {
     return (async () => {
       try {
@@ -601,6 +670,35 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'dsh-mobile-notify: banner overlay')
 
+    const TurnToggleView = (props: { sessionId?: string }) => createElement(SessionTurnToggle, {
+      sessionId: props.sessionId,
+      currentSessionId,
+      t,
+      getConfig: () => config,
+      subscribe: ctx.sessions.list.subscribe,
+      getSnapshot: ctx.sessions.list.getSnapshot,
+      onToggle: toggleTurnDone,
+    })
+
+    ctx.effect(() => {
+      let dispose: (() => void) | undefined
+      ctx.slots.inject('conversation.session.header.actions', () => {
+        dispose?.()
+        try {
+          dispose = ctx.slots.register(
+            { name: 'conversation.session.header.actions', id: 'mobile-notify-turn', order: 60, locale: NS },
+            TurnToggleView,
+          )
+        } catch (error) {
+          console.warn('dsh-mobile-notify: turn toggle registration failed', error)
+        }
+      })
+      return () => {
+        dispose?.()
+        dispose = undefined
+      }
+    }, 'dsh-mobile-notify: turn toggle')
+
     const ConfigCardView = (() => createElement(ConfigCard, {
       t,
       sendTest,
@@ -628,6 +726,16 @@ export function apply(ctx: ClientContext): void {
 
   installBridge()
   registerSlots()
+
+  ctx.effect(() => {
+    const dispose = ctx.sessions.list.subscribe(() => syncNotices())
+    syncNotices()
+    return () => {
+      dispose()
+      for (const record of publishedNotices.values()) record.dispose()
+      publishedNotices.clear()
+    }
+  }, 'dsh-mobile-notify: notice projection')
 
   unsubscribeStatus = ctx.uiSession.sessionStatus.subscribe(() => scan())
   scan()

@@ -11,9 +11,14 @@ export interface SessionRow {
   readonly origin?: string
 }
 
+export interface SessionProjectionSnapshot {
+  readonly values: Readonly<Record<string, unknown>>
+}
+
 export interface SessionListSnapshot {
   readonly ids: readonly string[]
   readonly byId: Record<string, SessionRow | undefined>
+  readonly projectionsBySession?: Readonly<Record<string, SessionProjectionSnapshot | undefined>>
 }
 
 export interface PendingInteraction {
@@ -24,6 +29,9 @@ export interface PendingInteraction {
   readonly toolName?: string
   readonly reason?: string
   readonly questions?: readonly { readonly question?: string }[]
+  readonly noticeTitle?: string
+  readonly noticeBody?: string
+  readonly createdAt?: number
 }
 
 export interface SessionStatus {
@@ -42,7 +50,7 @@ export interface SlotOptions {
 
 export interface ClientSlots {
   inject: (name: string, callback: () => void) => void
-  register: (options: SlotOptions, component: ComponentType<never>) => () => void
+  register: <P>(options: SlotOptions, component: ComponentType<P>) => () => void
 }
 
 export interface ClientLocale {
@@ -54,12 +62,23 @@ export interface SessionBindingSnapshot {
   readonly key?: string
 }
 
+export interface PendingInteractionPublisher {
+  (
+    interaction: PendingInteraction,
+    delegate: () => Promise<void>,
+  ): () => void
+}
+
 export interface ClientUiSession {
   readonly sessionStatus: Observable<ReadonlyMap<string, SessionStatus>>
   /** Main-view Session binding; `current.key` is the Session the user is viewing. */
   readonly adapter?: {
     readonly current: Observable<SessionBindingSnapshot>
   }
+  /** Register a synthetic pending-interaction domain; absent on older clients. */
+  readonly registerPendingInteraction?: (
+    precedence: (interaction: PendingInteraction) => number,
+  ) => PendingInteractionPublisher
 }
 
 export interface ClientWorkspace {
@@ -117,7 +136,7 @@ export const DEFAULT_CLIENT_CONFIG: ClientConfig = {
   includeToolName: true,
 }
 
-export type PendingKind = 'approval' | 'question' | 'plan-review' | 'turn'
+export type PendingKind = 'approval' | 'question' | 'plan-review' | 'turn' | 'notice'
 
 export interface PendingItem {
   readonly key: string
@@ -130,6 +149,9 @@ export interface PendingItem {
   readonly toolName?: string
   readonly reason?: string
   readonly question?: string
+  readonly noticeTitle?: string
+  readonly noticeBody?: string
+  readonly createdAt?: number
 }
 
 export interface ShellInfo {

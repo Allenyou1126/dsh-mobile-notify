@@ -114,12 +114,20 @@ Shell 只负责 WebView、登录、scopen extras 和 JS 桥（另一个仓库）
 
 ### G9 模型主动推送工具
 
-- 提供 `mobile_notify` 工具，让模型在用户明确要求时直接推送一条自定义标题/正文通知。
+- 提供 `mobile_notify` 工具，让模型在用户明确要求时推送一条自定义标题/正文通知。
 - 参数 `title`（必填，≤60）与 `body`（可选，≤1000，保留换行）；清洗控制字符、转义 Markdown，不读审批/会话正文。
-- 直接走已配置 transport（`serverchan3`/`dryRun`），不进入 pending/ack，不使用 Web-first 回退；受 `pushPerMinute`、超时/重试和 SendKey 约束。
-- 默认 TAG `dsh-notice`；当前会话有效时附 `kind=notice` 的 `scopen` 深链，否则用 `fallbackUrl`。
-- `notify.modelTool=false` 时不注册；注册/发送失败只影响工具，不影响审批/提问通知。
+- **与审批/提问相同的流程**：进入 `DecisionEngine` 的 debounce/presence/ack/web-first 流程，先页面内提醒/Web Notification，Web 未送达才回退 Server酱³；受 `detail`/`privacy`、`pushPerMinute`、超时/重试和 SendKey 约束。
+- 通过 `mobileNotify` Session projection 把通知广播给页面；Client 用合成 pending interaction 显示同一个浮动卡并 ack `kind=notice`；结束后清理 projection。
+- 工具返回 `{ ok: true, queued: true }`；默认 TAG `dsh-notice`；当前会话有效时附 `kind=notice` 的 `scopen` 深链，否则用 `fallbackUrl`。
+- `notify.modelTool=false` 时不注册；注册/入队失败只影响工具，不影响审批/提问通知。
 - 配置卡提供开关；README/DETAIL 说明适用场景、长度限制和隐私边界。
+
+### G10 按对话 turnDone
+
+- 对话标题栏提供 🔔 按钮，单独开启/关闭该对话的 turn-done 通知。
+- 设置写入 `plugin:dsh-mobile-notify/turn-done` Session 插件记录，经 projection 持久化/恢复；未设置的对话跟随全局 `notify.turnDone`。
+- Host `registerEventObservers` 用 `turnDoneFor(session) ?? config.notify.turnDone` 判定；不影响其他对话、审批/提问或 `mobile_notify`。
+- 新增 `PUT /mobile/session-settings`（Session 不存在 404，设置限流）。
 
 ## 3. 非目标
 
@@ -213,7 +221,7 @@ dsh-mobile-notify/
 
 **总预算**：本仓库约 2 周（不含 Shell 仓库的 M3 工作），与 DECISION“总计 2–3 周”一致。不要为了提前演示跳过 M1 的决策状态机测试；它是唯一容易悄悄错的逻辑。
 
-**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 浮动提醒卡/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials、`mobile_notify` 已实现。85 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例已重启并运行。浮动提醒卡已改为右下角浮层，并支持“当前正在查看的 Session 不弹卡”。M3 真机验证、M4 连续使用仍未执行。
+**实现状态（2026-11-21）**：M1/M2/M2.5 代码与安装已落地；Client 浮动提醒卡/通知/presence/ack/桥、插件页 Configuration 配置卡、`/mobile/settings`、configEditor/credentials、`mobile_notify` Web-first 与按对话 turnDone 已实现。95 项单测与构建通过；隔离 profile 中已验证配置卡保存 TAG、写入/清除 SendKey（响应不含 key）且插件保持运行。目标 profile 已移除 `dsh-web-ui-notify`；主实例已重启并运行。浮动提醒卡已改为右下角浮层，并支持“当前正在查看的 Session 不弹卡”。M3 真机验证、M4 连续使用仍未执行。
 
 ## 7. 验收清单
 
@@ -243,7 +251,8 @@ dsh-mobile-notify/
 | A18 | 插件页 Configuration | 在 Plugins → 移动通知 → Configuration 可读取/保存 publicBase、transport、TAG、notify/privacy/limits；SendKey 只显示已配置状态，可写入/清除；保存后插件可恢复运行，响应不含 SendKey |
 | A19 | 当前正在查看触发事件的 Session | 页面可见/聚焦时不弹浮动卡；ack `delivered=true, via=in-page`，不推 Server酱³；页面隐藏/失焦仍可按系统通知/回退处理 |
 | A20 | 当前查看同一 Session 但页面隐藏/失焦 | 不弹浮动卡；走浏览器系统通知或回退，不因“当前会话”误抑制 |
-| A21 | 模型调用 `mobile_notify` | 指定标题/正文直接推送（或 dryRun 记录）；带 `dsh-notice` TAG 和当前会话深链；不进入审批 pending/ack；关闭 `notify.modelTool` 后工具不可见 |
+| A22 | 对话粒度 turnDone | 标题栏 🔔 可单独开/关当前对话；设置写入 Session 日志并在重开/重启后保留；未设置对话跟随全局；其他对话不受影响 |
+| A21 | 模型调用 `mobile_notify` | 进入与审批/提问相同的 Web-first 流程；页面内浮动卡/Web Notification 先行，无 ack 才回退 Server酱³；带 `dsh-notice` TAG 和当前会话深链；工具返回 `queued: true`；关闭 `notify.modelTool` 后工具不可见 |
 
 ### 7.2 安全与错误
 
@@ -261,7 +270,8 @@ dsh-mobile-notify/
 | S10 | TAG 中含会话名/原因/sessionId/SendKey | 不允许；TAG 只来自配置的稳定分组，不含动态内容 |
 | S11 | TAG 非法/超长/超过数量上限 | 插件加载失败并说明字段；不在发送时静默截断（运行期意外值丢弃并 warning） |
 | S12 | 配置卡保存 SendKey | 只回传 configured/writable/available；不进入 Config、日志、GET 响应或 React 持久化；清除后 record 删除 |
-| S13 | `mobile_notify` 标题/正文超长或含控制字符 | 工具返回明确错误；`desp` 转义 Markdown；日志不记录正文 |
+| S13 | `mobile_notify` 标题/正文超长或含控制字符 | 工具返回明确错误；projection/`desp` 转义或截断；日志不记录正文 |
+| S14 | `PUT /mobile/session-settings` 的 sessionId 不存在/非法 | 404 或 400；不写 Session 日志；不影响其他对话 |
 
 ### 7.3 工程
 

@@ -33,6 +33,7 @@ interface SessionHeaderLike {
 interface SessionLike {
   readonly id: string
   readonly header?: SessionHeaderLike
+  readonly append?: (type: string, data: unknown) => unknown
 }
 
 interface TurnEndEvent {
@@ -148,7 +149,7 @@ function turnEvent(ctx: EventContext, session: SessionLike, event: TurnEndEvent)
 export function registerEventObservers(
   ctx: EventContext,
   engine: DecisionEngine,
-  options: { turnDone: boolean },
+  options: { turnDone: (session: SessionLike) => boolean },
 ): void {
   ctx.on('approval/request', async (req, next) => {
     let event: NormalizedEvent | undefined
@@ -195,7 +196,15 @@ export function registerEventObservers(
   }, true)
 
   ctx.on('session/event', (session, event) => {
-    if (!options.turnDone || event.type !== 'turn/end') return
+    if (event.type !== 'turn/end') return
+    let enabled = false
+    try {
+      enabled = options.turnDone(session)
+    } catch (error) {
+      ctx.logger.warn('dsh-mobile-notify: turnDone predicate failed', error)
+      return
+    }
+    if (!enabled) return
     try {
       const normalized = turnEvent(ctx, session, event)
       if (normalized !== undefined) {

@@ -54,7 +54,7 @@ DSH Web 通知 bundle（Host + Client 双面），负责：
 | 服务端路由前缀 | `/mobile/*` |
 | Android 包名 | `top.allenyou.dsh` |
 | 契约版本 | `1` |
-| 目标 DSH | `0.2.2-rc.5`（精确锁定；升 DSH 需重新回归） |
+| 目标 DSH | `0.2.3-alpha.2`（`engines.dsh` 为 `^0.2.3-alpha.2`；升 DSH 需重新回归） |
 | 目标 Android Shell | `0.1.x`（[dsh-android-shell](../../../dsh-android-shell)） |
 | 推送 App | Server酱³ App（`com.ft07.serverchan.app3.server_app3`，支持 MiPush 与 `scopen`） |
 

@@ -39,9 +39,10 @@ Host 使用 presence（页面可见/聚焦、Android Shell 前后台）和 Clien
 
 ## 要求
 
-- DeepSeek Harness `0.2.2-rc.5`（`engines.dsh` 精确匹配）。
-- Node.js `>= 24.9.0`。
+- DeepSeek Harness `0.2.3-alpha.2`（`engines.dsh` 为 `^0.2.3-alpha.2`）。
+- Node.js `^24.22.3 || >=26.13.1`（与 DSH 引擎要求一致）。
 - DSH Web profile。
+- 0.2.2-rc.5 及更早版本不再受支持：0.2.3 移除了 `Connection.authenticatedUrl`/`requestRejection`，并把 `uiSession.sessionStatus` 移到独立的 Client 包。
 - 可选：
   - Server酱³ App 的 `sctp...` SendKey（用于手机回退）。
   - 配套 Android 薄壳（用于 `scopen` 深链；不包含在本仓库）。

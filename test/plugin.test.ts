@@ -7,7 +7,8 @@ import { quietLogger } from './helpers.ts'
 
 interface Route {
   path: string
-  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+  auth?: 'anonymous' | 'required' | 'deny'
+  handler: (req: IncomingMessage, res: ServerResponse, peer?: unknown) => void | Promise<void>
 }
 
 interface FakeResponse extends ServerResponse {
@@ -85,11 +86,6 @@ function makeContext(): FakeContext {
         return () => { routes.delete(route.path) }
       },
     },
-    connection: {
-      requestRejection: () => undefined,
-      admit: () => ({ peer: {} }),
-      authenticatedUrl: (base: string) => `${base}?token=test`,
-    },
     sessions: { get: (id: string) => id === 'session-1' ? { id, header: {} } : undefined },
     get: (name: string) => name === 'tools' ? toolsService : undefined,
     on: (event: string, listener: (...args: unknown[]) => unknown) => {
@@ -116,6 +112,11 @@ test('apply registers routes, event observers, and the mobile_notify tool', () =
     '/mobile/session-settings',
     '/mobile/settings',
   ])
+  assert.equal(fake.routes.get('/mobile/bootstrap')?.auth, 'anonymous')
+  for (const [path, route] of fake.routes) {
+    if (path === '/mobile/bootstrap') continue
+    assert.equal(route.auth, 'required')
+  }
   assert.deepEqual([...fake.listeners.keys()].sort(), [
     'approval/request',
     'session/event',
@@ -125,7 +126,7 @@ test('apply registers routes, event observers, and the mobile_notify tool', () =
   for (const cleanup of fake.cleanups.reverse()) cleanup()
 })
 
-test('bootstrap redirects to the authenticated URL with no-store headers', async () => {
+test('bootstrap redirects to the configured publicBase with no-store headers', async () => {
   const fake = makeContext()
   apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
   const route = fake.routes.get('/mobile/bootstrap')
@@ -133,12 +134,12 @@ test('bootstrap redirects to the authenticated URL with no-store headers', async
   const res = makeResponse()
   await route.handler(makeRequest('GET'), res)
   assert.equal(res.status, 302)
-  assert.equal(res.headers.location, 'https://dsh.example/?token=test')
+  assert.equal(res.headers.location, 'https://dsh.example/')
   assert.equal(res.headers['cache-control'], 'no-store')
   for (const cleanup of fake.cleanups.reverse()) cleanup()
 })
 
-test('presence and health routes work through the fake connection', async () => {
+test('presence and health routes work through the fake web server', async () => {
   const fake = makeContext()
   apply(fake.ctx, { publicBase: 'https://dsh.example/', transport: 'dryRun' })
   const presence = fake.routes.get('/mobile/presence')

@@ -37,7 +37,7 @@ import { DEFAULT_CLIENT_CONFIG } from './types.ts'
 import { cleanText, shortId } from '../shared/text.ts'
 
 export const name = 'dsh-mobile-notify'
-export const inject = ['sessions', 'slots', 'locale', 'uiSession', 'uiWorkspace']
+export const inject = ['sessions', 'slots', 'locale', 'uiSession', 'uiSession.sessionStatus', 'uiWorkspace']
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u
 const CLIENT_ID_STORAGE = 'dsh-mobile-notify:clientId'

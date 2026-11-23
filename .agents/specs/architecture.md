@@ -1,7 +1,7 @@
 # 架构、协议与状态机
 
 > 状态：规格定稿（2026-11-20）；M1 Host 核心 + M2 Client + M2.5 图形配置 + `mobile_notify` Web-first + 按对话 turnDone 已实现，待真机联调。
-> 接口基线：[plugin-contract.md](../../../dsh-android-shell/.agents/specs/plugin-contract.md) v1；产品取舍：[DECISION.md](../../../DECISION.md)；目标 DSH `0.2.2-rc.5`。
+> 接口基线：[plugin-contract.md](../../../dsh-android-shell/.agents/specs/plugin-contract.md) v1；产品取舍：[DECISION.md](../../../DECISION.md)；目标 DSH `0.2.3-alpha.2`。
 > 本文里的“契约”指 Shell ↔ 本插件的 v1 契约；本文新增的兼容性扩展集中在 §11。
 
 ## 1. 组件与数据流
@@ -303,9 +303,9 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 
 ### 7.1 通用
 
-- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, handler })`。同一 path 只允许注册一次；`/mobile/settings` 的 GET/PUT 在同一个 handler 内按 method 分派；`/mobile/session-settings` 是独立的 PUT。
+- 全部 exact route：`ctx.webServer.register({ kind: 'exact', path, auth: 'required', handler })`。同一 path 只允许注册一次；`/mobile/settings` 的 GET/PUT 在同一个 handler 内按 method 分派；`/mobile/session-settings` 是独立的 PUT。
 - 响应头：`Cache-Control: no-store`；JSON 接口 `Content-Type: application/json; charset=utf-8`；不设 CORS。
-- 认证（除 bootstrap）：`requestRejection` → `admit`；失败返回 401/403，不读 body 之外的状态。
+- 认证：每个路由声明 `auth: 'required'`，DSH `webServer` 在 handler 前完成 Origin 与凭据准入；handler 不自行解析 Cookie/token。
 - 方法不符：405 + `Allow`。
 - `presence`/`ack` 请求体：`application/json`，≤2KB，JSON 对象；否则 415/413/400。`push/test` 接受空 body 或 `{}`；GET 路由无 body。
 - 错误体：
@@ -320,11 +320,11 @@ t0+?      手机回到前台（grace 内，且 inPage=true）→ 取消未发推
 
 ### 7.2 `GET /mobile/bootstrap`
 
-- 认证：依赖外部 oauth2-proxy（不在插件内校验 DSH Cookie；DSH 端口只绑 loopback）。
-- 行为：`302`，`Location: ctx.connection.authenticatedUrl(config.publicBase)`。
+- 认证：`auth: 'anonymous'`（同旧版无令牌跳转），并依赖外部 oauth2-proxy（DSH 端口只绑 loopback）。
+- 行为：`302`，`Location: config.publicBase`（DSH 0.2.3 移除 `Connection.authenticatedUrl`，由 Token provider 建立浏览器凭据）。
 - 头：`Cache-Control: no-store`、`Referrer-Policy: no-referrer`。
 - 不记录 token；不缓存；不拼 query。
-- 失败：`authenticatedUrl` 抛错 → 500 通用文案，日志记录原因（不含 token）。
+- 失败：`publicBase` 非法 → 500 通用文案，日志记录原因（不含 token）。
 - **部署硬前提**：此路由在公网必须被 oauth2-proxy 保护；否则等同于绕过登录。
 
 ### 7.3 `GET /mobile/config`（本仓库扩展）

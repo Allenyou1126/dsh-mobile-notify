@@ -6,20 +6,19 @@ import { DecisionEngine } from './host/decision.ts'
 import { registerEventObservers, type EventContext } from './host/events.ts'
 import { PresenceStore } from './host/presence.ts'
 import { SettingsService, configEditorOf } from './host/settings.ts'
-import { registerRoutes, type RouteConnection, type RouteWebServer } from './host/routes.ts'
+import { registerRoutes, type RouteWebServer } from './host/routes.ts'
 import { ServerChanTransport } from './host/serverchan3.ts'
 import { registerNotifyTool } from './host/tool.ts'
 import { createSessionState, type SessionAppendLike } from './host/session-state.ts'
 import type { LastPush, Logger } from './host/types.ts'
 
 export const name = 'dsh-mobile-notify'
-export const inject = ['webServer', 'connection', 'sessions', 'sessionProjections', 'tools']
+export const inject = ['webServer', 'sessions', 'sessionProjections', 'tools']
 
 export { Config }
 
 export interface HostContext extends EventContext {
   webServer: RouteWebServer
-  connection: RouteConnection
   logger: Logger
   effect: (callback: () => (() => void) | void, label?: string) => void
   fiber?: { entry?: unknown }
@@ -85,14 +84,14 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
 
   ctx.effect(
     () => registerRoutes(
-      { webServer: ctx.webServer, connection: ctx.connection },
+      { webServer: ctx.webServer },
       {
         config,
         presence,
         engine,
         logger: ctx.logger,
         clock,
-        version: '0.3.0',
+        version: '0.3.1',
         health,
         settings,
         sendTest: signal => transport.sendTest(signal),

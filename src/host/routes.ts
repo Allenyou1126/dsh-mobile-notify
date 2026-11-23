@@ -22,19 +22,14 @@ export interface RouteWebServer {
   register: (route: {
     kind: 'exact' | 'prefix'
     path: string
-    handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+    handler: (req: IncomingMessage, res: ServerResponse, peer?: unknown) => void | Promise<void>
+    /** `required` is the DSH default; named explicitly because the data routes are owner-only. */
+    auth?: 'anonymous' | 'required' | 'deny'
   }) => () => void
-}
-
-export interface RouteConnection {
-  requestRejection: (request: { headers: IncomingMessage['headers'] }) => 401 | 403 | undefined
-  admit: (request: { headers: IncomingMessage['headers'] }) => { peer: unknown } | { rejection: 401 | 403 }
-  authenticatedUrl: (baseUrl: string) => string
 }
 
 export interface RouteContext {
   webServer: RouteWebServer
-  connection: RouteConnection
 }
 
 export interface RoutesDeps {
@@ -299,29 +294,16 @@ async function readJson(req: IncomingMessage, res: ServerResponse, maxBytes: num
   }
 }
 
-function authorize(req: IncomingMessage, res: ServerResponse, connection: RouteConnection): boolean {
-  const rejection = connection.requestRejection({ headers: req.headers })
-  if (rejection !== undefined) {
-    sendError(res, rejection, rejection === 401 ? 'unauthorized' : 'forbidden')
-    req.resume()
-    return false
-  }
-  const admitted = connection.admit({ headers: req.headers })
-  if ('rejection' in admitted) {
-    sendError(res, admitted.rejection, admitted.rejection === 401 ? 'unauthorized' : 'forbidden')
-    req.resume()
-    return false
-  }
-  return true
-}
-
 function ipKey(req: IncomingMessage): string {
   return `ip:${req.socket.remoteAddress ?? 'unknown'}`
 }
 
-function bootstrap(res: ServerResponse, deps: RoutesDeps, connection: RouteConnection): void {
+function bootstrap(res: ServerResponse, deps: RoutesDeps): void {
+  // DSH 0.2.3 removed Connection.authenticatedUrl. This route carries no
+  // credential of its own and stays anonymous, like the old token-less
+  // redirect: the configured publicBase is the deployment entry to resume.
   try {
-    const location = connection.authenticatedUrl(deps.config.publicBase)
+    const location = new URL(deps.config.publicBase).toString()
     res.writeHead(302, {
       location,
       'cache-control': 'no-store',
@@ -381,10 +363,11 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
 
   type RouteMethod = 'GET' | 'POST' | 'PUT'
   type RouteRunner = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void
+  type RouteAuth = 'anonymous' | 'required'
   const handlersByPath = new Map<string, { handlers: Partial<Record<RouteMethod, RouteRunner>> }>()
 
   // DSH permits one exact route per pathname, so methods share one registration.
-  const register = (method: RouteMethod, path: string, run: RouteRunner): void => {
+  const register = (method: RouteMethod, path: string, run: RouteRunner, auth: RouteAuth = 'required'): void => {
     const existing = handlersByPath.get(path)
     if (existing !== undefined) {
       existing.handlers[method] = run
@@ -395,6 +378,7 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
     disposers.push(context.webServer.register({
       kind: 'exact',
       path,
+      auth,
       handler: async (req, res) => {
         try {
           const runner = req.method === undefined ? undefined : handlers[req.method as RouteMethod]
@@ -419,17 +403,17 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   }
 
   try {
+  // The old route carried no token and was reachable without a DSH session; it
+  // stays anonymous because it only forwards to the configured deployment URL.
   register('GET', '/mobile/bootstrap', (_req, res) => {
-    bootstrap(res, deps, context.connection)
-  })
+    bootstrap(res, deps)
+  }, 'anonymous')
 
   register('GET', '/mobile/config', (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     sendJson(res, 200, clientConfig(deps.config))
   })
 
   register('POST', '/mobile/presence', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     const body = await readJson(req, res, deps.config.limits.bodyBytes)
     if (!body.ok) {
       if (!res.writableEnded) sendError(res, 400, 'invalid_request', body.message)
@@ -449,7 +433,6 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   })
 
   register('POST', '/mobile/ack', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     const body = await readJson(req, res, deps.config.limits.bodyBytes)
     if (!body.ok) {
       if (!res.writableEnded) sendError(res, 400, 'invalid_request', body.message)
@@ -469,7 +452,6 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   })
 
   register('POST', '/mobile/push/test', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     // The route takes no body; drain an unexpected one so keep-alive stays sane.
     req.resume()
     if (!pushLimiter.take('push-test', 10, 60_000)) {
@@ -488,12 +470,10 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   })
 
   register('GET', '/mobile/health', (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     sendJson(res, 200, health(deps.config, deps))
   })
 
   register('PUT', '/mobile/session-settings', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     if (!settingsLimiter.take(ipKey(req), 20, 60_000)) {
       sendRateLimited(res)
       req.resume()
@@ -518,13 +498,11 @@ export function registerRoutes(context: RouteContext, deps: RoutesDeps): () => v
   })
 
   register('GET', '/mobile/settings', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     const view = await deps.settings.read()
     sendJson(res, 200, view)
   })
 
   register('PUT', '/mobile/settings', async (req, res) => {
-    if (!authorize(req, res, context.connection)) return
     if (!settingsLimiter.take(ipKey(req), 20, 60_000)) {
       sendRateLimited(res)
       req.resume()

@@ -192,8 +192,8 @@ dsh-mobile-notify/
 
 | 项 | 约束 |
 |---|---|
-| DSH | `0.2.2-rc.5`；`engines.dsh` 精确锁定；升版需回归 Client API |
-| Node | `>=24.9.0`（与 DSH 运行时一致） |
+| DSH | `0.2.3-alpha.2`；`engines.dsh` 为 `^0.2.3-alpha.2`；升版需回归 Client API |
+| Node | `^24.22.3 || >=26.13.1`（与 DSH 运行时一致） |
 | 部署 | `publicBase` 必须是 `https://dsh.allenyou.top/`；DSH 只绑 loopback |
 | 代理 | `/mobile/*` 必须经过现有 oauth2-proxy；尤其是 `/mobile/bootstrap` |
 | 认证 | 不引入 deviceToken；presence/ack/config/health 用 DSH 浏览器 Cookie + Origin |
@@ -318,7 +318,7 @@ dsh-mobile-notify/
 | Web ack 竞态/超时 | 已弹桌面仍推手机，或反之 | grace 4s；宁可多推不漏；日志可查；单测覆盖竞态 |
 | 多标签/多端重复 | 重复通知 | 客户端 key 去重 + Host 任一端 delivered 抑制 + 单飞 |
 | 手机前后台判定滞后 | 后台误判前台漏推 | `onPause` 主动上报 + 15s TTL；TTL 过期按后台处理 |
-| DSH 升级改 `uiSession.sessionStatus`/事件 | 插件失效 | `engines.dsh` 锁 `0.2.2-rc.5`；feature detect；降级为 Host-only + 页内提示 |
+| DSH 升级改 `uiSession.sessionStatus`/事件 | 插件失效 | `engines.dsh` 锁 `^0.2.3-alpha.2`；feature detect；降级为 Host-only + 页内提示 |
 | 浏览器通知权限默认拒绝 | Web 通知不弹 | 配置卡引导 + ack false 回退；浮动提醒卡仍在 |
 | 第三方看到审批摘要 | 隐私泄露 | `detail` 降级；不发代码/完整参数；锁屏详情由 Server酱³ 控制 |
 | 摘要含 Markdown 特殊字符 | Server酱³ 排版/链接损坏 | 值去换行/控制字符并截断；链接固定标签、单行、percent-encode |

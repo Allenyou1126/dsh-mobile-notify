@@ -1,20 +1,20 @@
 # 技术选型
 
 > 状态：**已定（2026-11-20）**；M1/M2 基础已按本选型实现，待安装/真机联调。本文的选择是实现依据；与 [DECISION.md](../../../DECISION.md) 冲突时以 DECISION 为准，与本目录其它文档冲突时以本文为准并回头修正。
-> 目标 DSH：`0.2.2-rc.5`；Node：`>=24.9.0`；包名/Client bundle id：`dsh-mobile-notify`。
+> 目标 DSH：`0.2.3-alpha.2`；Node：`^24.22.3 || >=26.13.1`；包名/Client bundle id：`dsh-mobile-notify`。
 
 ## 1. 结论表
 
 | 维度 | 选择 | 一句话理由 |
 |---|---|---|
 | 语言 | TypeScript 5.x，`strict` | DSH 的事件/客户端 API 类型复杂；编译期发现漂移 |
-| 运行时 | Node `>=24.9.0`（Host）；浏览器 ES2022（Client） | 与 DSH `0.2.2-rc.5` 的引擎要求一致 |
+| 运行时 | Node `^24.22.3 || >=26.13.1`（Host）；浏览器 ES2022（Client） | 与 DSH `0.2.3-alpha.2` 的引擎要求一致 |
 | 插件框架 | DSH 原生 Cordis 插件（Host `apply/Config`） | 不引入第二套生命周期；effect 自动释放 |
 | 包形态 | **单包双面**：一个 `package.json` 同时声明 `dsh.bundle` + `dsh.client` | 一次安装、一份配置、Host/Client 协议不漂移 |
 | 配置校验 | `@deepseek-ai/schemastery`（DSH 自带） | DSH 官方 Config 形态；加载时失败、可操作 |
 | 模型工具 | `@deepseek-ai/dsh-tools` 的 `defineTool`（DSH 自带） | 参数/输出 schema 与工具执行走 DSH 官方管线；运行时不打包 |
 | HTTP 服务 | DSH `ctx.webServer.register` + Node `IncomingMessage/ServerResponse` | 不引入 Express/Koa；只注册 8 个精确路由 |
-| 认证 | DSH 浏览器 Cookie + `ctx.connection.requestRejection/admit` | 不引入 deviceToken/配对；复用现有 oauth2 会话 |
+| 认证 | DSH 浏览器 Cookie + Origin；路由声明 `auth: 'required'`，由 `webServer` 在 handler 前准入 | 不引入 deviceToken/配对；复用现有 oauth2 会话 |
 | 外发 HTTP | Node 内置 `fetch` + `AbortSignal.timeout` | 零第三方依赖；足够处理一次 JSON POST |
 | 客户端 UI | React 18（DSH 前端模块表提供）+ DSH 插槽 | 官方扩展点；主题/语言/插件页配置卡一致 |
 | 客户端通知 | `Notification` API（页面存活期） | 没有 Service Worker/Web Push；页面关闭后由 Host 回退 |
@@ -26,8 +26,8 @@
 | 回退通道 | Server酱³ App（`serverchan3`；联调用 `dryRun`） | 个人环境唯一“无 GMS、无长连接、可深链”的组合 |
 | Server酱³ 分组 | 低基数 TAG：namespace + 每类事件 + extra | 利用 App 的 Tag 过滤/阅读偏好；避免动态 Tag 膨胀 |
 | 明确不实现 | FCM / Mi Push / WorkManager / SSE / FGS / Web Push / deviceToken / 第三方 relay | 见 §12 被否方案 |
-| 类型来源 | 本机安装的 DSH `0.2.2-rc.5`（devDependencies 或离线 link farm） | 不凭记忆写 API；不把 DSH 类型 vendor 进仓库 |
-| DSH 兼容 | `engines.dsh: 0.2.2-rc.5`（精确锁定） | 客户端 API 在 rc 之间会变；升版必须回归 |
+| 类型来源 | 本机安装的 DSH `0.2.3-alpha.2`（devDependencies 或离线 link farm） | 不凭记忆写 API；不把 DSH 类型 vendor 进仓库 |
+| DSH 兼容 | `engines.dsh: ^0.2.3-alpha.2` | 客户端 API 在预发布之间会变；升版必须回归 |
 | 分发 | 本地 `dsh plugin`/Plugin Manager 安装；`private: true` | 自用、不上架、不发布 npm |
 | 许可 | 私有自用；复用旧插件代码保留 BSD-3-Clause 声明 | 不把第三方代码洗成自有 |
 
@@ -45,7 +45,7 @@
 
 ### 2.2 Node 24
 
-- `engines.node: ">=24.9.0"`，与 DSH CLI 的引擎一致。
+- `engines.node: "^24.22.3 || >=26.13.1"`，与 DSH CLI 的引擎一致。
 - Host 只使用 Node 内置模块：`node:http` 类型（实际由 DSH 传入）、`node:crypto`（如需短哈希）、`fetch`、`AbortSignal.timeout`、`node:test`（测试）。
 - 不引入 `dotenv`、`axios`、`express`、`ws`、`undici`（Node 自带 fetch）。
 - 定时器统一 `setTimeout(...).unref?.()`；插件卸载时 `ctx.effect` 清理。测试注入 clock，不用真实等待。
@@ -94,7 +94,7 @@
       ]
     }
   },
-  "engines": { "node": ">=24.9.0", "dsh": "0.2.2-rc.5" }
+  "engines": { "node": "^24.22.3 || >=26.13.1", "dsh": "^0.2.3-alpha.2" }
 }
 ```
 
@@ -116,7 +116,7 @@
 
 ```ts
 export const name = 'dsh-mobile-notify'
-export const inject = ['webServer', 'connection', 'sessions', 'sessionProjections', 'tools']
+export const inject = ['webServer', 'sessions', 'sessionProjections', 'tools']
 export const Config: Schema<Config> = ...
 export function apply(ctx: Context, config: Config): void { ... }
 ```
@@ -127,10 +127,11 @@ export function apply(ctx: Context, config: Config): void { ... }
 - 不注入 `approval`/`userQuestions` 服务（只观察事件），避免不必要的加载顺序依赖。
 - `tools` 是必需的：Host 通过 `defineTool` 注册 `mobile_notify`；`notify.modelTool=false` 时只跳过工具，不影响路由/事件。
 - `sessionProjections` 是必需的：`mobileNotify` projection 广播模型通知和按对话 turnDone；插件记录使用 `plugin:dsh-mobile-notify/*` 命名。
+- Client 入口注入 `uiSession.sessionStatus`（DSH 0.2.3 起该服务由 `@deepseek-ai/dsh-client-ui-session-status` 提供）。
 - 加载失败策略：
   - `publicBase` 缺失/非法 → Config 校验失败；bundle patch 给 `https://dsh.allenyou.top/` 默认值，安装后即可进配置页；
   - `transport=serverchan3` 无 SendKey → 插件仍加载，发送时返回 credentials missing；配置卡可写入 SendKey；
-  - `webServer`/`connection`/`sessions`/`sessionProjections`/`tools` 缺失 → 依赖注入失败，不静默降级；`mobile_notify` 注册失败只 warning。
+  - `webServer`/`sessions`/`sessionProjections`/`tools` 缺失 → 依赖注入失败，不静默降级；`mobile_notify` 注册失败只 warning。
 - SendKey 通过 `ctx.get('credentials')` 读取，不进入 Config；配置卡保存走 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`。
 
 ### 3.3 Client 入口
@@ -153,17 +154,17 @@ export function apply(ctx: Context): void { ... }
 
 | 路由 | 方法 | 认证 | 用途 |
 |---|---|---|---|
-| `/mobile/bootstrap` | GET | oauth2-proxy（外部） | 302 到 `ctx.connection.authenticatedUrl(publicBase)` |
-| `/mobile/config` | GET | DSH Cookie + Origin | 客户端需要的非敏感开关（本仓库的兼容性扩展） |
-| `/mobile/presence` | POST | DSH Cookie + Origin | presence 心跳 |
-| `/mobile/ack` | POST | DSH Cookie + Origin | delivered/failed 回执 |
-| `/mobile/push/test` | POST | DSH Cookie + Origin | 配置卡测试推送 |
-| `/mobile/health` | GET | DSH Cookie + Origin | 非敏感诊断 |
-| `/mobile/settings` | GET/PUT | DSH Cookie + Origin | 插件页图形配置 |
-| `/mobile/session-settings` | PUT | DSH Cookie + Origin | 对话粒度 turnDone 覆盖 |
+| `/mobile/bootstrap` | GET | `auth: 'anonymous'` + oauth2-proxy（外部） | 302 到配置的 `publicBase` |
+| `/mobile/config` | GET | DSH `auth: 'required'`（Cookie + Origin） | 客户端需要的非敏感开关（本仓库的兼容性扩展） |
+| `/mobile/presence` | POST | DSH `auth: 'required'`（Cookie + Origin） | presence 心跳 |
+| `/mobile/ack` | POST | DSH `auth: 'required'`（Cookie + Origin） | delivered/failed 回执 |
+| `/mobile/push/test` | POST | DSH `auth: 'required'`（Cookie + Origin） | 配置卡测试推送 |
+| `/mobile/health` | GET | DSH `auth: 'required'`（Cookie + Origin） | 非敏感诊断 |
+| `/mobile/settings` | GET/PUT | DSH `auth: 'required'`（Cookie + Origin） | 插件页图形配置 |
+| `/mobile/session-settings` | PUT | DSH `auth: 'required'`（Cookie + Origin） | 对话粒度 turnDone 覆盖 |
 
 - 全部 `kind: 'exact'`；`Cache-Control: no-store`；不设 CORS 头；不走 Express 中间件。
-- 认证统一：先 `ctx.connection.requestRejection(req.headers)`，非 `undefined` 直接返回该状态；再 `ctx.connection.admit(req.headers)`，`'rejection' in result` 则返回；否则继续。
+- 认证统一：每个 exact route 声明 `auth: 'required'`，由 DSH `webServer` 在 handler 前完成 Origin 与凭据准入；handler 内不再调用 Connection 辅助方法。
 - **Health 也要求 DSH Cookie**（比契约的“loopback 或 Cookie”更严格）。理由：DSH 在反向代理后看到的远端地址是 loopback，按远端地址放行会把诊断路由暴露给公网。
 - `/mobile/bootstrap` 的安全性依赖部署：DSH 只绑 loopback、nginx 的 oauth2-proxy 保护 `/mobile/*`。如果 DSH 直接暴露，bootstrap 会变成绕过 oauth2 的入口；插件无法在代码里可靠判断，必须在部署文档中写成硬前提。
 
@@ -248,8 +249,8 @@ await build({
 
 > **实现修订（2026-11-20，2026-11-21 更新）**：v1 代码在 DSH 边界使用窄结构接口（Host `HostContext` / Client `ClientContext`），不 import 完整 DSH 类型包；只保留 `@deepseek-ai/schemastery`、`@deepseek-ai/dsh-tools` 与 React 类型为开发依赖。`dsh-tools` 仅用于 `defineTool` 的参数/输出 schema 与类型；它在运行期由 DSH 提供，不打进 bundle。这样构建/测试不依赖 pnpm 类型农场，但**升级 DSH 时必须按本节核对文档/源码并补回归**。
 
-- 类型检查针对**本机安装的 DSH `0.2.2-rc.5`**，不针对记忆或旧版本。
-- 首选：`devDependencies` 精确锁 `0.2.2-rc.5` 的 DSH 类型包（`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-user-approval`、`@deepseek-ai/dsh-user-questions`、`@deepseek-ai/dsh-client-ui-session`、`@deepseek-ai/dsh-client-ui-slots`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-workspace` 等，具体以实际包名为准）。
+- 类型检查针对**本机安装的 DSH `0.2.3-alpha.2`**，不针对记忆或旧版本。
+- 首选：`devDependencies` 精确锁 `0.2.3-alpha.2` 的 DSH 类型包（`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools`；Client 仍用窄结构接口，不 import 完整类型包）。
 - 离线/本机包不在 npm 时：`scripts/link-types.mjs` 从 `DSH_INSTALL_DIR` / `which dsh` 的安装目录建立 `node_modules/@deepseek-ai` 符号链接农场（参考 `dsh-web-ui-notify` 的做法）；`tsconfig` 开 `preserveSymlinks`。脚本必须可重复执行、只改符号链接，不删除真实目录。
 - **不 vendor DSH 类型**：版本一变就会假通过；宁可 typecheck 失败。
 
@@ -260,7 +261,7 @@ await build({
 - **Node 内置 `node:test`** + `node:assert/strict`；不引入 Vitest/Jest/Mocha。
 - 直接执行 TypeScript：Node 24 类型剥离；测试文件 `test/**/*.test.ts`；`package.json` 的 `test` 为 `node --test`。
 - 不使用 jsdom。客户端纯逻辑通过可注入的 `DocumentLike`/`NotificationLike`/`WindowLike` 接口测试；React 组件只做类型检查 + 真机/浏览器手工验收，不在 v1 写 DOM 渲染测试。
-- 不 mock 整个 DSH；写一个 `test/fakes/ctx.ts`，只实现本插件用到的 `webServer.register`、`connection`、`sessions`、`sessionTitle`、`logger`、`effect`、`on`。
+- 不 mock 整个 DSH；写一个 `test/fakes/ctx.ts`，只实现本插件用到的 `webServer.register`、`sessions`、`sessionTitle`、`logger`、`effect`、`on`。
 - 时间相关逻辑注入 `Clock`；不 `sleep`。等待 promise 用明确的 deferred，不用轮询。
 - 网络相关：`ServerChan3Transport` 注入 `fetch`；测试返回固定响应，不联网。
 
@@ -331,7 +332,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 ### 8.3 升级/回滚
 
-- DSH 升级：先改 `engines.dsh` 并跑 `pnpm check` + 手工验收；Client API 变化可能导致只读字段/插槽失效。
+- DSH 升级：先改 `engines.dsh` 并跑 `pnpm check` + 手工验收；Client API 变化可能导致只读字段/插槽失效。0.2.3 起 `uiSession.sessionStatus` 改由独立 Client 包提供，已加入 `dsh.client.inject` 与模块 inject。
 - 插件回滚：停用本插件、重新启用 `dsh-web-ui-notify`（或什么都不用）；本插件不持久化数据，无需迁移。
 - 配置泄漏/换 SendKey：只改 Host 配置并重启；已发出的历史推送无法撤回。
 
@@ -340,7 +341,7 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 | 面 | 选择 |
 |---|---|
 | 传输 | 仅 HTTPS（部署由 nginx 终止；插件不处理证书） |
-| 认证 | DSH 浏览器 Cookie；`requestRejection` + `admit`；不引入设备令牌 |
+| 认证 | DSH 浏览器 Cookie + Origin；`webServer.register` 的 `auth: 'required'`；不引入设备令牌 |
 | Origin | 依赖 DSH 的 Host/Origin 校验；不自己解析 Cookie；不开 CORS |
 | Body | 2KB 上限、JSON only、对象 only、枚举/长度/字符集校验 |
 | 限流 | clientId + 远端地址；429 + `Retry-After` |
@@ -357,8 +358,8 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-mobile-notify
 
 | 组件 | 版本/假设 | 失败时 |
 |---|---|---|
-| DSH | `0.2.2-rc.5` | `engines.dsh` 阻止安装/激活；升级后回归 `uiSession.sessionStatus`、slot、connection API |
-| Node | `>=24.9.0` | 启动前检查；低版本直接报错 |
+| DSH | `0.2.3-alpha.2` | `engines.dsh` 阻止安装/激活；升级后回归 `uiSession.sessionStatus`、slot、webServer 路由准入 |
+| Node | `^24.22.3 || >=26.13.1` | 启动前检查；低版本直接报错 |
 | Android Shell | `0.1.x`，契约 v1 | 页面仍可加载；`window.__dshMobile` 缺失时 Shell 只打开首页；不崩 |
 | Server酱³ App | 1.1.7+（`scopen` 支持） | 无凭据/上游失败时只写日志，Web 路径不受影响 |
 | 浏览器 | 支持 `Notification`/`fetch`/`visibilityState` | `Notification` 缺失 → presence `unsupported` + ack false → 回退手机 |

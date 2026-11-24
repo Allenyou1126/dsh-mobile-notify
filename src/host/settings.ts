@@ -50,8 +50,14 @@ export function configEditorOf(ctx: { get: (name: string) => unknown }): ConfigE
 
 export interface SettingsDeps {
   config: EffectiveConfig
-  credentials: CredentialsLike | undefined
-  configEditor: ConfigEditorLike | undefined
+  /**
+   * Resolve the credentials service per operation, never at activation: DSH
+   * services become readable only once their fiber is active, and the
+   * credentials provider finishes asynchronous file loading after startup.
+   */
+  credentials: () => CredentialsLike | undefined
+  /** Resolve the config editor per operation for the same late-activation reason. */
+  configEditor: () => ConfigEditorLike | undefined
   entry: unknown
   logger: Logger
 }
@@ -120,17 +126,18 @@ export class SettingsService {
   }
 
   public get editable(): boolean {
-    return this.deps.configEditor !== undefined && this.deps.entry !== undefined
+    return this.deps.configEditor() !== undefined && this.deps.entry !== undefined
   }
 
   public async read(): Promise<SettingsView> {
-    const status = await sendkeyStatus(this.deps.credentials)
+    const credentials = this.deps.credentials()
+    const status = await sendkeyStatus(credentials)
     return {
       contract: 1,
       editable: this.editable,
       sendkey: {
         ...status,
-        available: this.deps.credentials !== undefined,
+        available: credentials !== undefined,
       },
       settings: copySettings(this.deps.config),
     }
@@ -163,14 +170,14 @@ export class SettingsService {
       throw error
     }
 
-    const editor = this.deps.configEditor
+    const editor = this.deps.configEditor()
     const entry = this.deps.entry
     if (editor === undefined || entry === undefined) {
       throw new SettingsError(503, 'this profile does not expose a configuration editor')
     }
 
     if (input.sendkey !== undefined) {
-      const credentials = this.deps.credentials
+      const credentials = this.deps.credentials()
       if (credentials === undefined) {
         throw new SettingsError(503, 'the credentials service is not available in this profile')
       }

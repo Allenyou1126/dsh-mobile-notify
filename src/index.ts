@@ -35,11 +35,12 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
   )
 
   const presence = new PresenceStore(clock)
-  const credentials = credentialsOf(ctx)
   const settings = new SettingsService({
     config,
-    credentials,
-    configEditor: configEditorOf(ctx),
+    // Optional services are resolved per use: a service whose fiber is still
+    // loading is invisible to ctx.get, and credentials finishes async startup.
+    credentials: () => credentialsOf(ctx),
+    configEditor: () => configEditorOf(ctx),
     entry: ctx.fiber?.entry,
     logger: ctx.logger,
   })
@@ -47,7 +48,7 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
     config,
     logger: ctx.logger,
     clock,
-    sendkey: () => readSendkey(credentials),
+    sendkey: () => readSendkey(credentialsOf(ctx)),
   })
   const sessionState = createSessionState(ctx, ctx.logger)
   const engine = new DecisionEngine({
@@ -91,7 +92,7 @@ export function apply(ctx: HostContext, input: PluginConfig): void {
         engine,
         logger: ctx.logger,
         clock,
-        version: '0.3.1',
+        version: '0.3.2',
         health,
         settings,
         sendTest: signal => transport.sendTest(signal),

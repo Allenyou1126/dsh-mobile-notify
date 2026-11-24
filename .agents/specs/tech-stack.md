@@ -132,7 +132,7 @@ export function apply(ctx: Context, config: Config): void { ... }
   - `publicBase` 缺失/非法 → Config 校验失败；bundle patch 给 `https://dsh.allenyou.top/` 默认值，安装后即可进配置页；
   - `transport=serverchan3` 无 SendKey → 插件仍加载，发送时返回 credentials missing；配置卡可写入 SendKey；
   - `webServer`/`sessions`/`sessionProjections`/`tools` 缺失 → 依赖注入失败，不静默降级；`mobile_notify` 注册失败只 warning。
-- SendKey 通过 `ctx.get('credentials')` 读取，不进入 Config；配置卡保存走 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`。
+- SendKey 通过 `ctx.get('credentials')` **按操作解析**（不在插件激活时缓存），不进入 Config；配置卡保存走 `ctx.get('configEditor').edit(ctx.fiber.entry, ...)`。DSH 的 `ctx.get` 只返回已激活 fiber 的服务，而 credentials/configEditor 的异步启动可能晚于本插件激活，因此这两项必须按需读取。
 
 ### 3.3 Client 入口
 

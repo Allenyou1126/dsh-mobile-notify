@@ -52,8 +52,8 @@ function makeService(options: { editor?: boolean; credentials?: boolean } = {}) 
   const editor = new FakeEditor()
   const service = new SettingsService({
     config: makeConfig(),
-    credentials: options.credentials === false ? undefined : credentials,
-    configEditor: options.editor === false ? undefined : editor,
+    credentials: () => options.credentials === false ? undefined : credentials,
+    configEditor: () => options.editor === false ? undefined : editor,
     entry: options.editor === false ? undefined : {},
     logger: quietLogger,
   })
@@ -121,6 +121,34 @@ test('missing config editor is read-only and write is refused', async () => {
     service.write({ settings: view.settings }),
     (error: unknown) => error instanceof SettingsError && error.status === 503,
   )
+})
+
+test('settings resolve credentials and the config editor per operation', async () => {
+  const credentials = new FakeCredentials()
+  const editor = new FakeEditor()
+  let currentCredentials: CredentialsLike | undefined
+  let currentEditor: FakeEditor | undefined
+  const service = new SettingsService({
+    config: makeConfig(),
+    credentials: () => currentCredentials,
+    configEditor: () => currentEditor,
+    entry: {},
+    logger: quietLogger,
+  })
+
+  const before = await service.read()
+  assert.equal(before.sendkey.available, false)
+  assert.equal(before.editable, false)
+
+  // The credentials and config-editor fibers finish activating after this
+  // plugin's apply; a per-use lookup must see both.
+  currentCredentials = credentials
+  currentEditor = editor
+  const after = await service.read()
+  assert.equal(after.sendkey.available, true)
+  assert.equal(after.editable, true)
+  await service.write({ settings: after.settings, sendkey: 'sctp42tTOKEN' })
+  assert.deepEqual(credentials.record, { kind: 'grant', payload: { sendkey: 'sctp42tTOKEN' } })
 })
 
 test('SendKey helper reads and clears records', async () => {
